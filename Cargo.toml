@@ -1,0 +1,8 @@
+[package]
+name = "cdefgab"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+roxmltree = { version = "0.20" }
+tempfile = "3.3.0"
