@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 roxmltree = { version = "0.20" }
 tempfile = "3.3.0"
+regex = { version = "1.11" }
