@@ -6,6 +6,14 @@ use roxmltree::Document;
 
 extern crate regex;
 use regex::Regex;
+use std::collections::HashMap;
+
+struct VoiceState {
+    current_position: usize,
+    prev_duration: u32,
+    prev_is_chord: bool,
+    first_note: bool,
+}
 
 #[derive(Default, Debug)]
 pub struct Score {
@@ -123,7 +131,12 @@ impl Score {
         };
 
         // Calculate total divisions in a measure
-        let total_divisions = (beats_per_measure as usize) * (divisions_per_quarter as usize);
+        let total_divisions = (beats_per_measure as usize) * (divisions_per_quarter as usize) * 4
+            / (beat_value as usize);
+
+        println!("Time Signature: {}/{}", beats_per_measure, beat_value);
+        println!("Divisions per Quarter: {}", divisions_per_quarter);
+        println!("Total Divisions per Measure: {}", total_divisions);
 
         let mut measures = Vec::new();
 
@@ -132,10 +145,33 @@ impl Score {
             for measure_node in part.children().filter(|n| n.has_tag_name("measure")) {
                 // Create a new Measure with total divisions
                 let mut measure = Measure::new(total_divisions);
+
+                // Initialize variables for chord handling per voice
+                let mut voice_states: HashMap<u8, VoiceState> = HashMap::new();
+
+                // Initialize variables for chord handling
                 let mut current_position = 0;
+                let mut prev_duration = 0;
+                let mut prev_is_chord = false;
+                let mut first_note = true;
 
                 // Parse each note within the measure
                 for note in measure_node.children().filter(|n| n.has_tag_name("note")) {
+                    // Get the voice number
+                    let voice = note
+                        .children()
+                        .find(|n| n.has_tag_name("voice"))
+                        .and_then(|n| n.text().map(|t| t.parse::<u8>().unwrap_or(1)))
+                        .unwrap_or(1);
+
+                    // Get or insert the VoiceState for this voice
+                    let voice_state = voice_states.entry(voice).or_insert(VoiceState {
+                        current_position: 0,
+                        prev_duration: 0,
+                        prev_is_chord: false,
+                        first_note: true,
+                    });
+
                     // Determine if this note is part of a chord
                     let is_chord = note.children().any(|n| n.has_tag_name("chord"));
 
@@ -208,6 +244,7 @@ impl Score {
                         (None, None)
                     };
 
+                    let is_chord = note.children().any(|n| n.has_tag_name("chord"));
                     // Create the Note struct
                     let note = Note {
                         pitch: pitch.clone(),
@@ -227,23 +264,33 @@ impl Score {
                         fret,
                         is_chord,
                     };
+                    // Update current_position if necessary
+                    if !voice_state.first_note {
+                        if !voice_state.prev_is_chord {
+                            // Previous note was not part of a chord
+                            voice_state.current_position += voice_state.prev_duration as usize;
+                        } else if !is_chord {
+                            // Previous note was part of a chord, and current note is not part of a chord
+                            voice_state.current_position += voice_state.prev_duration as usize;
+                        }
+                        // Else, both previous and current notes are part of a chord, do not increment
+                    }
 
                     // Add the note to the appropriate position in the measure
-                    if current_position < measure.positions.len() {
-                        measure.positions[current_position].push(note);
+                    if voice_state.current_position < measure.positions.len() {
+                        measure.positions[voice_state.current_position].push(note);
                     } else {
-                        // Handle cases where current_position exceeds the measure length
-                        println!(
-                            "Warning: Note at position {} exceeds measure length {}",
-                            current_position,
-                            measure.positions.len()
-                        );
+                        // Extend the positions vector if necessary
+                        measure
+                            .positions
+                            .resize(voice_state.current_position + 1, Vec::new());
+                        measure.positions[voice_state.current_position].push(note);
                     }
 
-                    // Update current_position if not a chord note
-                    if !is_chord {
-                        current_position += duration as usize;
-                    }
+                    // Update variables for next iteration
+                    voice_state.first_note = false;
+                    voice_state.prev_duration = duration;
+                    voice_state.prev_is_chord = is_chord;
                 }
 
                 measures.push(measure);
@@ -388,14 +435,3 @@ fn pitch_to_midi(pitch: &Pitch) -> u8 {
 }
 
 // Main function for testing
-
-fn main() {
-    let score = Score::parse_from_musicxml("path_to_your_musicxml_file.xml").unwrap();
-
-    // Print the parsed score for debugging
-    // println!("{:#?}", score);
-
-    // Print the tablature with specified dashes per division
-    let dashes_per_quarter = 3; // As per your requirement
-    score.print_score_as_tablature(4, 1); // Set chars_per_division to 1
-}

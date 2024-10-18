@@ -1,59 +1,61 @@
-// use std::sync::mpsc::Sender;
-// use std::time::{Duration, Instant};
+// time_scrubber.rs
 
-// use crate::music_representation::musical_structures::{Note, Score};
+use std::sync::mpsc::Sender;
+use std::time::{Duration, Instant};
 
-// pub struct TimeScrubber {
-//     pub start_time: Instant,
-//     pub stop_time: Option<Instant>,
-//     pub current_time: Duration,
-// }
+use crate::music_representation::musical_structures::{Note, Score};
 
-// impl TimeScrubber {
-//     pub fn new() -> Self {
-//         Self {
-//             start_time: Instant::now(),
-//             stop_time: None,
-//             current_time: Duration::new(0, 0),
-//         }
-//     }
+pub struct TimeScrubber {
+    pub start_time: Instant,
+    pub stop_time: Option<Instant>,
+    pub current_time: Duration,
+}
 
-//     pub fn start(&mut self) {
-//         self.start_time = Instant::now();
-//         self.current_time = Duration::new(0, 0);
-//     }
+impl TimeScrubber {
+    pub fn new() -> Self {
+        Self {
+            start_time: Instant::now(),
+            stop_time: None,
+            current_time: Duration::new(0, 0),
+        }
+    }
 
-//     pub fn stop(&mut self) {
-//         self.stop_time = Some(Instant::now());
-//     }
+    pub fn start(&mut self) {
+        self.start_time = Instant::now();
+        self.current_time = Duration::new(0, 0);
+    }
 
-//     pub fn set_current_time(&mut self, new_time: Duration) {
-//         self.current_time = new_time;
-//     }
+    pub fn stop(&mut self) {
+        self.stop_time = Some(Instant::now());
+    }
 
-//     pub fn simulate_playback(&mut self, score: &Score, tx: Sender<Vec<Note>>) {
-//         for measure in &score.measures {
-//             let measure_duration = Duration::from_secs_f32(
-//                 60.0 / score.tempo * score.time_signature.beats_per_measure as f32,
-//             );
+    pub fn set_current_time(&mut self, new_time: Duration) {
+        self.current_time = new_time;
+    }
 
-//             let mut current_beat = 0.0;
-//             for note in &measure.notes {
-//                 let delay = note.beat_position - current_beat;
-//                 if delay > 0.0 {
-//                     std::thread::sleep(Duration::from_secs_f32(60.0 / score.tempo * delay));
-//                     current_beat = note.beat_position;
-//                 }
-//                 let mut simultaneous_notes: Vec<Note> = vec![*note];
-//                 for next_note in &measure.notes {
-//                     if next_note.beat_position == note.beat_position
-//                         && next_note.string != note.string
-//                     {
-//                         simultaneous_notes.push(*next_note);
-//                     }
-//                 }
-//                 tx.send(simultaneous_notes).unwrap();
-//             }
-//         }
-//     }
-// }
+    pub fn simulate_playback(&mut self, score: &Score, tx: Sender<Vec<Note>>) {
+        let seconds_per_division = score.seconds_per_division;
+
+        for measure in &score.measures {
+            let total_divisions = measure.positions.len();
+
+            for division_index in 0..total_divisions {
+                let notes = &measure.positions[division_index];
+                if notes.is_empty() {
+                    continue; // Skip if no notes at this division
+                }
+
+                let target_time =
+                    Duration::from_secs_f32(seconds_per_division * division_index as f32);
+                if self.current_time < target_time {
+                    let sleep_duration = target_time - self.current_time;
+                    std::thread::sleep(sleep_duration);
+                    self.current_time = target_time;
+                }
+
+                // Send notes at this division
+                tx.send(notes.clone()).unwrap();
+            }
+        }
+    }
+}
