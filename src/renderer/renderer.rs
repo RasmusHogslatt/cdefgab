@@ -69,7 +69,7 @@ pub fn render_measure(measure: &Measure, dashes_per_division: usize) -> Vec<Stri
         let position_in_dashes = division_index * dashes_per_division;
 
         for note in notes {
-            if let (Some(string), Some(fret)) = (note.string, note.fret) {
+            if let (Some(string), Some(fret)) = (note.1.string, note.1.fret) {
                 let string_index = (string - 1) as usize;
                 let fret_str = fret.to_string();
 

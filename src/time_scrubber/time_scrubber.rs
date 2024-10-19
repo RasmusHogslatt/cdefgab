@@ -63,31 +63,54 @@ impl TimeScrubber {
         let seconds_per_division = score.seconds_per_division;
         let seconds_per_measure = seconds_per_division * score.divisions_per_measure as f32;
         println!("Seconds per measure: {}", seconds_per_measure);
+
         match self.total_duration {
             Some(total_duration) => {
+                let start_instant = Instant::now();
                 let mut current_measure: usize = 0;
                 let mut current_division: usize = 0;
 
-                while self.elapsed().as_secs_f32() < total_duration.as_secs_f32() {
-                    // Start new measure
-                    if self.elapsed().as_secs_f32() % seconds_per_measure == 0.0 {
-                        current_measure += 1;
-                        println!("Current measure: {}", current_measure);
+                // Loop until the elapsed time exceeds the total duration or all measures are played
+                while self.elapsed().as_secs_f32() < total_duration.as_secs_f32()
+                    && current_measure < score.measures.len()
+                {
+                    let elapsed = self.elapsed().as_secs_f32();
+
+                    // Calculate which measure and division we are currently in
+                    let total_divisions_elapsed = (elapsed / seconds_per_division).floor() as usize;
+                    current_measure =
+                        total_divisions_elapsed / score.divisions_per_measure as usize;
+                    current_division =
+                        total_divisions_elapsed % score.divisions_per_measure as usize;
+
+                    if current_measure >= score.measures.len() {
+                        break; // Prevent out-of-bounds access
                     }
 
-                    if self.elapsed().as_secs_f32() % seconds_per_division == 0.0 {
-                        match current_division < score.divisions_per_measure as usize - 1 {
-                            true => current_division += 1,
-                            false => current_division = 0,
-                        }
-                        println!("Current division: {}", current_division);
-                        let measure = &score.measures[current_measure];
-                        let notes = &measure.positions[current_division];
-                        println!("{:#?}", notes.len());
-                        for note in notes {
-                            println!("{}", note);
-                        }
+                    // println!(
+                    //     "Current measure: {}, Current division: {}",
+                    //     current_measure, current_division
+                    // );
+
+                    let measure = &score.measures[current_measure];
+                    let notes_map = &measure.positions[current_division];
+
+                    // Convert HashMap<NoteKey, Note> to Vec<Note>
+                    let notes: Vec<Note> = notes_map.values().cloned().collect();
+
+                    // println!("Number of notes at position: {}", notes.len());
+                    // for note in &notes {
+                    //     println!("{}", note);
+                    // }
+
+                    // Send the notes to the receiver
+                    if tx.send(notes).is_err() {
+                        println!("Receiver has been dropped. Stopping playback.");
+                        break;
                     }
+
+                    // Sleep for a short duration to prevent tight looping
+                    thread::sleep(Duration::from_millis(10));
                 }
             }
             None => {
@@ -95,48 +118,7 @@ impl TimeScrubber {
             }
         }
 
-        // while self.elapsed_since_start < self.total_duration {}
-        // for measure in &score.measures {
-        //     println!("{:#?}", self.elapsed_since_start);
-        //     for division_index in 0..score.divisions_per_measure {
-        //         let notes = &measure.positions[division_index as usize];
-        //         let division_time = seconds_per_division * division_index as f32;
-
-        //         // Calculate the time to wait until the next division
-        //         let target_time = Duration::from_secs_f32(division_time);
-
-        //         if let Some(start_time) = self.start_time {
-        //             let elapsed = start_time.elapsed();
-
-        //             println!(
-        //                 "Division Index: {}, Target Time: {:.3}, Elapsed Time: {:.3}, Sleep Duration: {:.3}",
-        //                 division_index,
-        //                 target_time.as_secs_f32(),
-        //                 elapsed.as_secs_f32(),
-        //                 if elapsed < target_time {
-        //                     (target_time - elapsed).as_secs_f32()
-        //                 } else {
-        //                     0.0
-        //                 }
-        //             );
-
-        //             if elapsed < target_time {
-        //                 let sleep_duration = target_time - elapsed;
-        //                 thread::sleep(sleep_duration);
-        //             }
-
-        //             // Send notes at this division if there are any
-        //             if !notes.is_empty() {
-        //                 tx.send(notes.clone()).unwrap();
-        //             }
-        //         } else {
-        //             // If start_time is not set, start it now
-        //             self.start_time = Some(Instant::now());
-        //         }
-        //     }
-        // }
-
-        // // Stop playback after all notes are played
+        // Stop playback after all notes are played
         self.stop();
     }
 }

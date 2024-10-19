@@ -9,6 +9,13 @@ extern crate regex;
 use regex::Regex;
 use std::collections::HashMap;
 
+// Define the NoteKey struct
+#[derive(Hash, Eq, PartialEq, Debug, Clone)]
+pub struct NoteKey {
+    pub string: u8,
+    pub fret: u8,
+}
+
 struct VoiceState {
     current_position: usize,
     prev_duration: u32,
@@ -57,7 +64,8 @@ pub struct Pitch {
     pub alter: Option<i8>, // Sharps or flats (-1 for flat, +1 for sharp)
     pub octave: u8,        // Octave number
 }
-//DURATION IS 0
+
+// DURATION IS 0
 #[derive(Clone, Copy, Debug)]
 pub enum Technique {
     HammerOn,
@@ -74,13 +82,13 @@ pub struct TimeSignature {
 
 #[derive(Clone, Default, Debug)]
 pub struct Measure {
-    pub positions: Vec<Vec<Note>>, // Group notes by their division positions
+    pub positions: Vec<HashMap<NoteKey, Note>>, // Use HashMap to ensure unique notes per position
 }
 
 impl Measure {
     pub fn new(total_divisions: usize) -> Self {
         Measure {
-            positions: vec![vec![]; total_divisions], // Initialize with empty vectors for each division
+            positions: vec![HashMap::new(); total_divisions], // Initialize with empty HashMaps for each division
         }
     }
 }
@@ -287,15 +295,16 @@ impl Score {
                     }
 
                     // Add the note to the appropriate position in the measure
-                    if voice_state.current_position < measure.positions.len() {
-                        measure.positions[voice_state.current_position].push(note);
-                    } else {
-                        // Extend the positions vector if necessary
+                    if voice_state.current_position >= measure.positions.len() {
                         measure
                             .positions
-                            .resize(voice_state.current_position + 1, Vec::new());
-                        measure.positions[voice_state.current_position].push(note);
+                            .resize_with(voice_state.current_position + 1, HashMap::new);
                     }
+                    let note_key = NoteKey {
+                        string: note.string.unwrap(),
+                        fret: note.fret.unwrap(),
+                    };
+                    measure.positions[voice_state.current_position].insert(note_key, note);
 
                     // Update variables for next iteration
                     voice_state.first_note = false;

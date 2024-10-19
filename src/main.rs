@@ -41,6 +41,7 @@ fn main() {
 
     // Receive and play notes as they are sent
     for received_notes in rx {
+        // println!("{}", received_notes.clone().len());
         play_notes(received_notes);
     }
 }
