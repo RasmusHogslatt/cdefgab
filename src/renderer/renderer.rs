@@ -1,6 +1,24 @@
 // renderer.rs
 
-use crate::music_representation::musical_structures::{Measure, Note, Score};
+use crate::music_representation::musical_structures::{Measure, Score};
+
+pub fn score_info(score: &Score) {
+    println!("----- SCORE INFO -----");
+    println!(
+        "Time signatuare: {}/{}",
+        score.time_signature.beats_per_measure, score.time_signature.beat_value
+    );
+    println!("Tempo: {}", score.tempo);
+    println!(
+        "Divisions per quarter note: {}",
+        score.divisions_per_quarter
+    );
+    println!("Divisions per measure: {}", score.divisions_per_measure);
+    println!("Number of measures: {}", score.measures.len());
+    println!("Seconds per division: {}", score.seconds_per_division);
+    println!("Seconds per beat: {}", score.seconds_per_beat);
+    println!("----------------------");
+}
 
 pub fn render_score(score: &Score, measures_per_row: usize, dashes_per_division: usize) -> String {
     let mut rendered_output = String::new();

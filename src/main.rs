@@ -1,15 +1,13 @@
 // main.rs
-
 mod music_representation;
 mod renderer;
 mod time_scrubber;
-
 use std::env;
 use std::sync::mpsc;
 use std::thread;
 
 use music_representation::musical_structures::{Note, Score};
-use renderer::renderer::render_score;
+use renderer::renderer::{render_score, score_info};
 use time_scrubber::time_scrubber::TimeScrubber;
 
 fn main() {
@@ -23,7 +21,7 @@ fn main() {
 
     // Parse the MusicXML file
     let score = Score::parse_from_musicxml(file_path).expect("Failed to parse MusicXML");
-
+    score_info(&score);
     // Render the score
     let measures_per_row = 4;
     let dashes_per_division = 3; // Adjust as needed
@@ -32,12 +30,16 @@ fn main() {
 
     // Set up the time scrubber and playback simulation
     let (tx, rx) = mpsc::channel();
-    let mut scrubber = TimeScrubber::new();
+    let mut scrubber = TimeScrubber::new(&score);
 
+    // Start the playback in a separate thread
+    let score_clone = score.clone(); // Ensure Score implements Clone
+    score_info(&score_clone);
     thread::spawn(move || {
-        scrubber.simulate_playback(&score, tx);
+        scrubber.simulate_playback(&score_clone, tx);
     });
 
+    // Receive and play notes as they are sent
     for received_notes in rx {
         play_notes(received_notes);
     }

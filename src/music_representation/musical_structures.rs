@@ -1,3 +1,4 @@
+use core::fmt;
 use std::fs::File;
 use std::io::Read;
 
@@ -15,7 +16,7 @@ struct VoiceState {
     first_note: bool,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct Score {
     pub measures: Vec<Measure>,
     pub time_signature: TimeSignature,
@@ -23,6 +24,7 @@ pub struct Score {
     pub divisions_per_quarter: u8,
     pub seconds_per_beat: f32,     // seconds_per_beat = 60 / tempo
     pub seconds_per_division: f32, // seconds_per_beat / divisions_per_quarter
+    pub divisions_per_measure: u8,
 }
 
 #[derive(Clone, Debug)]
@@ -38,13 +40,24 @@ pub struct Note {
     pub is_chord: bool,             // Whether the note is part of a chord
 }
 
+impl fmt::Display for Note {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "String:{}, Fret: {}",
+            self.string.unwrap(),
+            self.fret.unwrap()
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Pitch {
     pub step: char,        // Note step (A, B, C, D, E, F, G)
     pub alter: Option<i8>, // Sharps or flats (-1 for flat, +1 for sharp)
     pub octave: u8,        // Octave number
 }
-
+//DURATION IS 0
 #[derive(Clone, Copy, Debug)]
 pub enum Technique {
     HammerOn,
@@ -131,12 +144,9 @@ impl Score {
         };
 
         // Calculate total divisions in a measure
-        let total_divisions = (beats_per_measure as usize) * (divisions_per_quarter as usize) * 4
-            / (beat_value as usize);
-
-        println!("Time Signature: {}/{}", beats_per_measure, beat_value);
-        println!("Divisions per Quarter: {}", divisions_per_quarter);
-        println!("Total Divisions per Measure: {}", total_divisions);
+        let divisions_per_measure =
+            (beats_per_measure as usize) * (divisions_per_quarter as usize) * 4
+                / (beat_value as usize);
 
         let mut measures = Vec::new();
 
@@ -144,7 +154,7 @@ impl Score {
         for part in root.children().filter(|n| n.has_tag_name("part")) {
             for measure_node in part.children().filter(|n| n.has_tag_name("measure")) {
                 // Create a new Measure with total divisions
-                let mut measure = Measure::new(total_divisions);
+                let mut measure = Measure::new(divisions_per_measure);
 
                 // Initialize variables for chord handling per voice
                 let mut voice_states: HashMap<u8, VoiceState> = HashMap::new();
@@ -304,59 +314,8 @@ impl Score {
             divisions_per_quarter,
             seconds_per_beat,
             seconds_per_division,
+            divisions_per_measure: divisions_per_measure as u8,
         })
-    }
-
-    pub fn print_score_as_tablature(&self, measures_per_row: usize, chars_per_division: usize) {
-        let mut current_measure_index = 0;
-        let total_measures = self.measures.len();
-
-        // Iterate through all measures
-        while current_measure_index < total_measures {
-            let end_measure_index = (current_measure_index + measures_per_row).min(total_measures);
-
-            // Print the set of measures per row
-            for string_number in 1..=6 {
-                for measure_index in current_measure_index..end_measure_index {
-                    // Print each measure for the current string
-                    self.print_measure(
-                        &self.measures[measure_index],
-                        string_number,
-                        chars_per_division,
-                    );
-                    print!("  "); // Separate measures
-                }
-                println!();
-            }
-            println!(); // Newline after each row of measures
-
-            current_measure_index = end_measure_index;
-        }
-    }
-
-    fn print_measure(&self, measure: &Measure, string_number: u8, chars_per_division: usize) {
-        let total_divisions = measure.positions.len();
-        let total_chars = total_divisions * chars_per_division;
-        let mut string_representation = vec!['-'; total_chars];
-
-        for (division, notes) in measure.positions.iter().enumerate() {
-            for note in notes {
-                if let (Some(note_string), Some(fret)) = (note.string, note.fret) {
-                    if note_string == string_number {
-                        let position = division * chars_per_division;
-                        let fret_str = fret.to_string();
-                        for (i, ch) in fret_str.chars().enumerate() {
-                            if position + i < string_representation.len() {
-                                string_representation[position + i] = ch;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        let string_output: String = string_representation.into_iter().collect();
-        print!("{}|", string_output);
     }
 }
 
@@ -433,5 +392,3 @@ fn pitch_to_midi(pitch: &Pitch) -> u8 {
     let semitone = step_to_semitone(pitch.step) + pitch.alter.unwrap_or(0);
     (pitch.octave * 12) + semitone as u8
 }
-
-// Main function for testing
