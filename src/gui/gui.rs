@@ -22,6 +22,9 @@ pub struct Configs {
     pub file_path: Option<String>,
     pub measures_per_row: usize,
     pub dashes_per_division: usize,
+}
+
+pub struct DisplayMetrics {
     pub total_score_time: f32,
 }
 
@@ -33,7 +36,6 @@ impl Configs {
             file_path: Some("silent.xml".to_owned()),
             measures_per_row: 4,
             dashes_per_division: 4,
-            total_score_time: 0.0,
         }
     }
 }
@@ -46,6 +48,7 @@ pub struct TabApp {
     is_playing: bool,
     stop_flag: Arc<AtomicBool>,
     pub configs: Configs,
+    pub display_metrics: DisplayMetrics,
     pub previous_notes: Option<Vec<Note>>,
     pub current_notes: Option<Vec<Note>>,
 }
@@ -53,6 +56,9 @@ pub struct TabApp {
 impl TabApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let configs = Configs::new();
+        let display_metrics = DisplayMetrics {
+            total_score_time: 0.0,
+        };
         let file_path = configs.file_path.clone().unwrap_or_default();
         let score = Score::parse_from_musicxml(file_path).expect("Failed to parse MusicXML");
         let tab_text = render_score(
@@ -72,6 +78,7 @@ impl TabApp {
             is_playing: false,
             stop_flag,
             configs,
+            display_metrics,
             previous_notes: None,
             current_notes: None,
         }
@@ -141,7 +148,7 @@ impl eframe::App for TabApp {
                     let seconds_per_beat = 60.0 / self.configs.custom_tempo as f32;
                     let seconds_per_division =
                         seconds_per_beat / score.divisions_per_quarter as f32;
-                    self.configs.total_score_time = score.measures.len() as f32
+                    self.display_metrics.total_score_time = score.measures.len() as f32
                         * seconds_per_division
                         * score.divisions_per_measure as f32;
                 }
@@ -149,7 +156,7 @@ impl eframe::App for TabApp {
                     let seconds_per_beat = 60.0 / score.tempo as f32;
                     let seconds_per_division =
                         seconds_per_beat / score.divisions_per_quarter as f32;
-                    self.configs.total_score_time = score.measures.len() as f32
+                    self.display_metrics.total_score_time = score.measures.len() as f32
                         * seconds_per_division
                         * score.divisions_per_measure as f32;
                 }
@@ -157,7 +164,7 @@ impl eframe::App for TabApp {
 
             ui.label(format!(
                 "Total score time: {}",
-                self.configs.total_score_time
+                self.display_metrics.total_score_time
             ));
 
             ui.separator();
