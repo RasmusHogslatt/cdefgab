@@ -10,11 +10,11 @@ use std::{
 use crate::{
     music_representation::musical_structures::{Note, Score},
     renderer::*,
-    time_scrubber::{self, time_scrubber::TimeScrubber},
+    time_scrubber::time_scrubber::TimeScrubber,
 };
 use eframe::egui;
 use egui::ScrollArea;
-use renderer::render_score;
+use renderer::{render_score, score_info};
 
 pub struct Configs {
     pub custom_tempo: usize,
@@ -192,11 +192,21 @@ impl eframe::App for TabApp {
 
         // Central panel to display the tabs
         egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Parsed Score Info");
+            if let Some(score) = &self.score {
+                ScrollArea::vertical()
+                    .id_salt("score_info_scroll_area")
+                    .show(ui, |ui| {
+                        ui.monospace(score_info(&score));
+                    });
+            }
             ui.heading("Tablature");
             if let Some(tab_text) = &self.tab_text {
-                ScrollArea::vertical().show(ui, |ui| {
-                    ui.monospace(tab_text);
-                });
+                ScrollArea::vertical()
+                    .id_salt("tab_scroll_area")
+                    .show(ui, |ui| {
+                        ui.monospace(tab_text);
+                    });
             }
         });
 

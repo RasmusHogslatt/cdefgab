@@ -34,15 +34,8 @@ pub struct Score {
 
 #[derive(Clone, Debug)]
 pub struct Note {
-    pub pitch: Option<Pitch>, // Some notes might not have a pitch (e.g., rests)
-    pub duration: u32,        // Duration of the note in divisions
-    pub note_type: String,    // Note type (e.g., quarter, eighth)
-    pub voice: u8,            // Voice number to distinguish different voices
-    pub stem_direction: Option<String>, // Direction of the stem ("up" or "down")
-    pub techniques: Vec<Technique>, // List of techniques used on the note (e.g., hammer-on, pull-off)
-    pub string: Option<u8>,         // The guitar string number (e.g., 1 to 6)
-    pub fret: Option<u8>,           // The fret number for the note on the guitar
-    pub is_chord: bool,             // Whether the note is part of a chord
+    pub string: Option<u8>, // The guitar string number (e.g., 1 to 6)
+    pub fret: Option<u8>,   // The fret number for the note on the guitar
 }
 
 impl fmt::Display for Note {
@@ -61,15 +54,6 @@ pub struct Pitch {
     pub step: char,        // Note step (A, B, C, D, E, F, G)
     pub alter: Option<i8>, // Sharps or flats (-1 for flat, +1 for sharp)
     pub octave: u8,        // Octave number
-}
-
-// DURATION IS 0
-#[derive(Clone, Copy, Debug)]
-pub enum Technique {
-    HammerOn,
-    PullOff,
-    Slide,
-    Bend,
 }
 
 #[derive(Clone, Copy, Default, Debug)]
@@ -164,12 +148,6 @@ impl Score {
                 // Initialize variables for chord handling per voice
                 let mut voice_states: HashMap<u8, VoiceState> = HashMap::new();
 
-                // Initialize variables for chord handling
-                let mut current_position = 0;
-                let mut prev_duration = 0;
-                let mut prev_is_chord = false;
-                let mut first_note = true;
-
                 // Parse each note within the measure
                 for note in measure_node.children().filter(|n| n.has_tag_name("note")) {
                     // Get the voice number
@@ -186,9 +164,6 @@ impl Score {
                         prev_is_chord: false,
                         first_note: true,
                     });
-
-                    // Determine if this note is part of a chord
-                    let is_chord = note.children().any(|n| n.has_tag_name("chord"));
 
                     // Extract the pitch, duration, string, and fret for each note
                     let pitch = if let Some(pitch_node) =
@@ -227,12 +202,6 @@ impl Score {
                         .and_then(|n| n.text().map(|t| t.parse::<u32>().unwrap_or(0)))
                         .unwrap_or(0);
 
-                    let voice = note
-                        .children()
-                        .find(|n| n.has_tag_name("voice"))
-                        .and_then(|n| n.text().map(|t| t.parse::<u8>().unwrap_or(1)))
-                        .unwrap_or(1);
-
                     // Extract the string and fret for each note
                     let technical = note
                         .children()
@@ -261,24 +230,7 @@ impl Score {
 
                     let is_chord = note.children().any(|n| n.has_tag_name("chord"));
                     // Create the Note struct
-                    let note = Note {
-                        pitch: pitch.clone(),
-                        duration,
-                        note_type: note
-                            .children()
-                            .find(|n| n.has_tag_name("type"))
-                            .and_then(|n| n.text().map(|t| t.to_string()))
-                            .unwrap_or("quarter".to_string()),
-                        voice,
-                        stem_direction: note
-                            .children()
-                            .find(|n| n.has_tag_name("stem"))
-                            .and_then(|n| n.text().map(|t| t.to_string())),
-                        techniques: vec![], // Not implemented for simplicity
-                        string,
-                        fret,
-                        is_chord,
-                    };
+                    let note = Note { string, fret };
                     // Update current_position if necessary
                     if !voice_state.first_note {
                         if !voice_state.prev_is_chord {
@@ -308,7 +260,6 @@ impl Score {
                     voice_state.prev_duration = duration;
                     voice_state.prev_is_chord = is_chord;
                 }
-
                 measures.push(measure);
             }
         }
@@ -322,8 +273,6 @@ impl Score {
         })
     }
 }
-
-// Helper functions to calculate string and fret from pitch
 
 fn calculate_string_and_fret(pitch: &Pitch) -> Option<(u8, u8)> {
     // Define standard tuning pitches for each string

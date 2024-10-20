@@ -11,7 +11,6 @@ pub struct TimeScrubber {
     pub total_duration: Option<Duration>,
     pub elapsed_since_start: Duration,
     pub seconds_per_division: f32,
-    pub seconds_per_beat: f32,
 }
 
 impl TimeScrubber {
@@ -32,7 +31,6 @@ impl TimeScrubber {
             total_duration: Some(total_duration),
             elapsed_since_start: Duration::ZERO,
             seconds_per_division,
-            seconds_per_beat,
         }
     }
 
@@ -56,18 +54,6 @@ impl TimeScrubber {
         }
     }
 
-    pub fn reset(&mut self) {
-        self.start_time = None;
-        self.elapsed_since_start = Duration::ZERO;
-    }
-
-    pub fn set_elapsed(&mut self, new_elapsed: Duration) {
-        self.elapsed_since_start = new_elapsed;
-        if let Some(start) = self.start_time {
-            self.start_time = Some(Instant::now() - self.elapsed_since_start);
-        }
-    }
-
     pub fn simulate_playback(
         &mut self,
         score: &Score,
@@ -82,7 +68,6 @@ impl TimeScrubber {
         match self.total_duration {
             Some(total_duration) => {
                 let mut current_measure: usize = 0;
-                let mut current_division: usize = 0;
                 let mut last_sent_measure: Option<usize> = None;
                 let mut last_sent_division: Option<usize> = None;
 
@@ -98,7 +83,7 @@ impl TimeScrubber {
                         (elapsed / self.seconds_per_division).floor() as usize;
                     current_measure =
                         total_divisions_elapsed / score.divisions_per_measure as usize;
-                    current_division =
+                    let current_division =
                         total_divisions_elapsed % score.divisions_per_measure as usize;
 
                     if current_measure >= score.measures.len() {
