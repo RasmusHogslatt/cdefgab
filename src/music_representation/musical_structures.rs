@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::Read;
 
 extern crate roxmltree;
-use roxmltree::Document;
+use roxmltree::{Document, Node};
 
 extern crate regex;
 use regex::Regex;
@@ -78,7 +78,7 @@ impl Measure {
 impl Score {
     pub fn parse_from_musicxml(file_path: String) -> Result<Score, String> {
         // Read the MusicXML file content
-        let mut file = File::open(file_path.as_str()).map_err(|e| e.to_string())?;
+        let mut file = File::open(&file_path).map_err(|e| e.to_string())?;
         let mut xml_content = String::new();
         file.read_to_string(&mut xml_content)
             .map_err(|e| e.to_string())?;
@@ -92,177 +92,17 @@ impl Score {
         let root = doc.root_element();
 
         // Extract score metadata
-        let divisions_per_quarter = root
-            .descendants()
-            .find(|n| n.has_tag_name("divisions"))
-            .and_then(|n| n.text().map(|t| t.parse::<u8>().unwrap_or(1)))
-            .unwrap_or(1);
+        let (divisions_per_quarter, time_signature, tempo) = extract_score_metadata(&root);
 
-        let beats_per_measure = root
-            .descendants()
-            .find(|n| n.has_tag_name("time"))
-            .and_then(|n| {
-                n.descendants()
-                    .find(|m| m.has_tag_name("beats"))
-                    .and_then(|b| b.text().map(|t| t.parse::<u8>().unwrap_or(0)))
-            })
-            .unwrap_or(4);
+        // Calculate divisions per measure
+        let divisions_per_measure = calculate_divisions_per_measure(
+            time_signature.beats_per_measure,
+            divisions_per_quarter,
+            time_signature.beat_value,
+        );
 
-        let beat_value = root
-            .descendants()
-            .find(|n| n.has_tag_name("time"))
-            .and_then(|n| {
-                n.descendants()
-                    .find(|m| m.has_tag_name("beat-type"))
-                    .and_then(|b| b.text().map(|t| t.parse::<u8>().unwrap_or(0)))
-            })
-            .unwrap_or(4);
-
-        let tempo = root
-            .descendants()
-            .find(|n| n.has_tag_name("sound") && n.attribute("tempo").is_some())
-            .and_then(|n| {
-                n.attribute("tempo")
-                    .map(|t| t.parse::<usize>().unwrap_or(120))
-            })
-            .unwrap_or(120);
-
-        let time_signature = TimeSignature {
-            beats_per_measure,
-            beat_value,
-        };
-
-        // Calculate total divisions in a measure
-        let divisions_per_measure =
-            (beats_per_measure as usize) * (divisions_per_quarter as usize) * 4
-                / (beat_value as usize);
-
-        let mut measures = Vec::new();
-
-        // Iterate over parts and extract guitar parts
-        for part in root.children().filter(|n| n.has_tag_name("part")) {
-            for measure_node in part.children().filter(|n| n.has_tag_name("measure")) {
-                // Create a new Measure with total divisions
-                let mut measure = Measure::new(divisions_per_measure);
-
-                // Initialize variables for chord handling per voice
-                let mut voice_states: HashMap<u8, VoiceState> = HashMap::new();
-
-                // Parse each note within the measure
-                for note in measure_node.children().filter(|n| n.has_tag_name("note")) {
-                    // Get the voice number
-                    let voice = note
-                        .children()
-                        .find(|n| n.has_tag_name("voice"))
-                        .and_then(|n| n.text().map(|t| t.parse::<u8>().unwrap_or(1)))
-                        .unwrap_or(1);
-
-                    // Get or insert the VoiceState for this voice
-                    let voice_state = voice_states.entry(voice).or_insert(VoiceState {
-                        current_position: 0,
-                        prev_duration: 0,
-                        prev_is_chord: false,
-                        first_note: true,
-                    });
-
-                    // Extract the pitch, duration, string, and fret for each note
-                    let pitch = if let Some(pitch_node) =
-                        note.children().find(|n| n.has_tag_name("pitch"))
-                    {
-                        let step = pitch_node
-                            .children()
-                            .find(|n| n.has_tag_name("step"))
-                            .and_then(|n| n.text().map(|t| t.chars().next().unwrap_or('C')))
-                            .unwrap_or('C');
-
-                        let octave = pitch_node
-                            .children()
-                            .find(|n| n.has_tag_name("octave"))
-                            .and_then(|n| n.text().map(|t| t.parse::<u8>().unwrap_or(4)))
-                            .unwrap_or(4);
-
-                        let alter = pitch_node
-                            .children()
-                            .find(|n| n.has_tag_name("alter"))
-                            .and_then(|n| n.text().map(|t| t.parse::<i8>().ok()))
-                            .flatten();
-
-                        Some(Pitch {
-                            step,
-                            alter,
-                            octave,
-                        })
-                    } else {
-                        None
-                    };
-
-                    let duration = note
-                        .children()
-                        .find(|n| n.has_tag_name("duration"))
-                        .and_then(|n| n.text().map(|t| t.parse::<u32>().unwrap_or(0)))
-                        .unwrap_or(0);
-
-                    // Extract the string and fret for each note
-                    let technical = note
-                        .children()
-                        .find(|n| n.has_tag_name("notations"))
-                        .and_then(|n| n.children().find(|n| n.has_tag_name("technical")));
-
-                    let string = technical
-                        .and_then(|n| n.children().find(|n| n.has_tag_name("string")))
-                        .and_then(|n| n.text())
-                        .and_then(|t| t.parse::<u8>().ok());
-
-                    let fret = technical
-                        .and_then(|n| n.children().find(|n| n.has_tag_name("fret")))
-                        .and_then(|n| n.text())
-                        .and_then(|t| t.parse::<u8>().ok());
-
-                    // If string and fret are not provided, calculate them from pitch
-                    let (string, fret) = if let (Some(s), Some(f)) = (string, fret) {
-                        (Some(s), Some(f))
-                    } else if let Some(ref p) = pitch {
-                        calculate_string_and_fret(p)
-                            .map_or((None, None), |(s, f)| (Some(s), Some(f)))
-                    } else {
-                        (None, None)
-                    };
-
-                    let is_chord = note.children().any(|n| n.has_tag_name("chord"));
-                    // Create the Note struct
-                    let note = Note { string, fret };
-                    // Update current_position if necessary
-                    if !voice_state.first_note {
-                        if !voice_state.prev_is_chord {
-                            // Previous note was not part of a chord
-                            voice_state.current_position += voice_state.prev_duration as usize;
-                        } else if !is_chord {
-                            // Previous note was part of a chord, and current note is not part of a chord
-                            voice_state.current_position += voice_state.prev_duration as usize;
-                        }
-                        // Else, both previous and current notes are part of a chord, do not increment
-                    }
-
-                    // Add the note to the appropriate position in the measure
-                    if voice_state.current_position >= measure.positions.len() {
-                        measure
-                            .positions
-                            .resize_with(voice_state.current_position + 1, HashMap::new);
-                    }
-                    let note_key = NoteKey {
-                        string: note.string.unwrap(),
-                        fret: note.fret.unwrap(),
-                    };
-                    measure.positions[voice_state.current_position].insert(note_key, note);
-
-                    // Update variables for next iteration
-                    voice_state.first_note = false;
-                    voice_state.prev_duration = duration;
-                    voice_state.prev_is_chord = is_chord;
-                }
-                measures.push(measure);
-            }
-        }
+        // Parse measures
+        let measures = parse_measures(&root, divisions_per_measure)?;
 
         Ok(Score {
             measures,
@@ -271,6 +111,200 @@ impl Score {
             divisions_per_quarter,
             divisions_per_measure: divisions_per_measure as u8,
         })
+    }
+}
+// fn parse_xml_content(file_path: &str) -> Result<(Document, String), String> {
+//     // Read and clean the XML content
+//     let mut file = File::open(file_path).map_err(|e| e.to_string())?;
+//     let mut xml_content = String::new();
+//     file.read_to_string(&mut xml_content)
+//         .map_err(|e| e.to_string())?;
+
+//     let dtd_regex = Regex::new(r"(?s)<!DOCTYPE.*?>").unwrap();
+//     let xml_content = dtd_regex.replace(&xml_content, "").to_string();
+
+//     // Parse the XML content
+//     let doc = Document::parse(&xml_content).map_err(|e| e.to_string())?;
+
+//     Ok((doc, xml_content))
+// }
+fn extract_score_metadata(root: &Node) -> (u8, TimeSignature, usize) {
+    let divisions_per_quarter = root
+        .descendants()
+        .find(|n| n.has_tag_name("divisions"))
+        .and_then(|n| n.text().map(|t| t.parse::<u8>().unwrap_or(1)))
+        .unwrap_or(1);
+
+    let beats_per_measure = root
+        .descendants()
+        .find(|n| n.has_tag_name("time"))
+        .and_then(|n| {
+            n.descendants()
+                .find(|m| m.has_tag_name("beats"))
+                .and_then(|b| b.text().map(|t| t.parse::<u8>().unwrap_or(0)))
+        })
+        .unwrap_or(4);
+
+    let beat_value = root
+        .descendants()
+        .find(|n| n.has_tag_name("time"))
+        .and_then(|n| {
+            n.descendants()
+                .find(|m| m.has_tag_name("beat-type"))
+                .and_then(|b| b.text().map(|t| t.parse::<u8>().unwrap_or(0)))
+        })
+        .unwrap_or(4);
+
+    let tempo = root
+        .descendants()
+        .find(|n| n.has_tag_name("sound") && n.attribute("tempo").is_some())
+        .and_then(|n| {
+            n.attribute("tempo")
+                .map(|t| t.parse::<usize>().unwrap_or(120))
+        })
+        .unwrap_or(120);
+
+    let time_signature = TimeSignature {
+        beats_per_measure,
+        beat_value,
+    };
+
+    (divisions_per_quarter, time_signature, tempo)
+}
+fn calculate_divisions_per_measure(
+    beats_per_measure: u8,
+    divisions_per_quarter: u8,
+    beat_value: u8,
+) -> usize {
+    (beats_per_measure as usize) * (divisions_per_quarter as usize) * 4 / (beat_value as usize)
+}
+fn parse_measures(root: &Node, divisions_per_measure: usize) -> Result<Vec<Measure>, String> {
+    let mut measures = Vec::new();
+
+    for part in root.children().filter(|n| n.has_tag_name("part")) {
+        for measure_node in part.children().filter(|n| n.has_tag_name("measure")) {
+            let measure = parse_measure(measure_node, divisions_per_measure)?;
+            measures.push(measure);
+        }
+    }
+
+    Ok(measures)
+}
+fn parse_measure(measure_node: Node, divisions_per_measure: usize) -> Result<Measure, String> {
+    let mut measure = Measure::new(divisions_per_measure);
+    let mut voice_states: HashMap<u8, VoiceState> = HashMap::new();
+
+    for note_node in measure_node.children().filter(|n| n.has_tag_name("note")) {
+        parse_note(note_node, &mut voice_states, &mut measure)?;
+    }
+
+    Ok(measure)
+}
+fn parse_note(
+    note_node: Node,
+    voice_states: &mut HashMap<u8, VoiceState>,
+    measure: &mut Measure,
+) -> Result<(), String> {
+    let voice = note_node
+        .children()
+        .find(|n| n.has_tag_name("voice"))
+        .and_then(|n| n.text().map(|t| t.parse::<u8>().unwrap_or(1)))
+        .unwrap_or(1);
+
+    let voice_state = voice_states.entry(voice).or_insert(VoiceState {
+        current_position: 0,
+        prev_duration: 0,
+        prev_is_chord: false,
+        first_note: true,
+    });
+
+    let pitch = extract_pitch(&note_node);
+    let duration = note_node
+        .children()
+        .find(|n| n.has_tag_name("duration"))
+        .and_then(|n| n.text().map(|t| t.parse::<u32>().unwrap_or(0)))
+        .unwrap_or(0);
+
+    let (string, fret) = extract_technical_info(&note_node, &pitch);
+
+    let is_chord = note_node.children().any(|n| n.has_tag_name("chord"));
+
+    let note = Note { string, fret };
+
+    if !voice_state.first_note {
+        if !voice_state.prev_is_chord || !is_chord {
+            voice_state.current_position += voice_state.prev_duration as usize;
+        }
+    }
+
+    if voice_state.current_position >= measure.positions.len() {
+        measure
+            .positions
+            .resize_with(voice_state.current_position + 1, HashMap::new);
+    }
+
+    if let (Some(s), Some(f)) = (note.string, note.fret) {
+        let note_key = NoteKey { string: s, fret: f };
+        measure.positions[voice_state.current_position].insert(note_key, note);
+    }
+
+    voice_state.first_note = false;
+    voice_state.prev_duration = duration;
+    voice_state.prev_is_chord = is_chord;
+
+    Ok(())
+}
+fn extract_pitch(note_node: &Node) -> Option<Pitch> {
+    if let Some(pitch_node) = note_node.children().find(|n| n.has_tag_name("pitch")) {
+        let step = pitch_node
+            .children()
+            .find(|n| n.has_tag_name("step"))
+            .and_then(|n| n.text().map(|t| t.chars().next().unwrap_or('C')))
+            .unwrap_or('C');
+
+        let octave = pitch_node
+            .children()
+            .find(|n| n.has_tag_name("octave"))
+            .and_then(|n| n.text().map(|t| t.parse::<u8>().unwrap_or(4)))
+            .unwrap_or(4);
+
+        let alter = pitch_node
+            .children()
+            .find(|n| n.has_tag_name("alter"))
+            .and_then(|n| n.text().map(|t| t.parse::<i8>().ok()))
+            .flatten();
+
+        Some(Pitch {
+            step,
+            alter,
+            octave,
+        })
+    } else {
+        None
+    }
+}
+fn extract_technical_info(note_node: &Node, pitch: &Option<Pitch>) -> (Option<u8>, Option<u8>) {
+    let technical = note_node
+        .children()
+        .find(|n| n.has_tag_name("notations"))
+        .and_then(|n| n.children().find(|n| n.has_tag_name("technical")));
+
+    let string = technical
+        .and_then(|n| n.children().find(|n| n.has_tag_name("string")))
+        .and_then(|n| n.text())
+        .and_then(|t| t.parse::<u8>().ok());
+
+    let fret = technical
+        .and_then(|n| n.children().find(|n| n.has_tag_name("fret")))
+        .and_then(|n| n.text())
+        .and_then(|t| t.parse::<u8>().ok());
+
+    if string.is_some() && fret.is_some() {
+        (string, fret)
+    } else if let Some(ref p) = pitch {
+        calculate_string_and_fret(p).map_or((None, None), |(s, f)| (Some(s), Some(f)))
+    } else {
+        (None, None)
     }
 }
 

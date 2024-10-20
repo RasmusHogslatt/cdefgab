@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::music_representation::musical_structures::{Note, Score};
+use crate::music_representation::musical_structures::{Measure, Note, Score};
 
 pub struct TimeScrubber {
     pub start_time: Option<Instant>,
@@ -62,65 +62,60 @@ impl TimeScrubber {
     ) {
         self.start();
 
-        let seconds_per_measure = self.seconds_per_division * score.divisions_per_measure as f32;
-        println!("Seconds per measure: {}", seconds_per_measure);
+        if let Some(total_duration) = self.total_duration {
+            let mut last_sent_measure: Option<usize> = None;
+            let mut last_sent_division: Option<usize> = None;
 
-        match self.total_duration {
-            Some(total_duration) => {
-                let mut current_measure: usize = 0;
-                let mut last_sent_measure: Option<usize> = None;
-                let mut last_sent_division: Option<usize> = None;
+            while self.elapsed().as_secs_f32() < total_duration.as_secs_f32()
+                && !stop_flag.load(Ordering::Relaxed)
+            {
+                let elapsed = self.elapsed().as_secs_f32();
+                let (current_measure, current_division) = self.calculate_current_time(
+                    elapsed,
+                    score.divisions_per_measure as usize,
+                    score.measures.len(),
+                );
 
-                // Loop until the elapsed time exceeds the total duration or all measures are played
-                while self.elapsed().as_secs_f32() < total_duration.as_secs_f32()
-                    && current_measure < score.measures.len()
-                    && !stop_flag.load(Ordering::Relaxed)
-                {
-                    let elapsed = self.elapsed().as_secs_f32();
-
-                    // Calculate which measure and division we are currently in
-                    let total_divisions_elapsed =
-                        (elapsed / self.seconds_per_division).floor() as usize;
-                    current_measure =
-                        total_divisions_elapsed / score.divisions_per_measure as usize;
-                    let current_division =
-                        total_divisions_elapsed % score.divisions_per_measure as usize;
-
-                    if current_measure >= score.measures.len() {
-                        break; // Prevent out-of-bounds access
-                    }
-
-                    // Only send notes if we have not already sent for this measure and division
-                    if Some(current_measure) != last_sent_measure
-                        || Some(current_division) != last_sent_division
-                    {
-                        let measure = &score.measures[current_measure];
-                        let notes_map = &measure.positions[current_division];
-
-                        // Convert HashMap<NoteKey, Note> to Vec<Note>
-                        let notes: Vec<Note> = notes_map.values().cloned().collect();
-                        println!("{}", current_division);
-                        // Send the notes to the receiver
-                        if tx.send(notes).is_err() {
-                            println!("Receiver has been dropped. Stopping playback.");
-                            break;
-                        }
-
-                        // Update last sent measure and division
-                        last_sent_measure = Some(current_measure);
-                        last_sent_division = Some(current_division);
-                    }
-
-                    // Sleep for a short duration to prevent tight looping
-                    thread::sleep(Duration::from_millis(10));
+                if current_measure >= score.measures.len() {
+                    break;
                 }
+
+                if Some(current_measure) != last_sent_measure
+                    || Some(current_division) != last_sent_division
+                {
+                    self.send_notes(&score.measures[current_measure], current_division, &tx);
+
+                    last_sent_measure = Some(current_measure);
+                    last_sent_division = Some(current_division);
+                }
+
+                thread::sleep(Duration::from_millis(10));
             }
-            None => {
-                println!("Can't simulate as total_duration is not set.");
-            }
+        } else {
+            println!("Can't simulate as total_duration is not set.");
         }
 
-        // Stop playback after all notes are played
         self.stop();
+    }
+
+    fn calculate_current_time(
+        &self,
+        elapsed: f32,
+        divisions_per_measure: usize,
+        total_measures: usize,
+    ) -> (usize, usize) {
+        let total_divisions_elapsed = (elapsed / self.seconds_per_division).floor() as usize;
+        let current_measure = total_divisions_elapsed / divisions_per_measure;
+        let current_division = total_divisions_elapsed % divisions_per_measure;
+        (current_measure.min(total_measures - 1), current_division)
+    }
+
+    fn send_notes(&self, measure: &Measure, current_division: usize, tx: &Sender<Vec<Note>>) {
+        let notes_map = &measure.positions[current_division];
+        let notes: Vec<Note> = notes_map.values().cloned().collect();
+
+        if tx.send(notes).is_err() {
+            println!("Receiver has been dropped. Stopping playback.");
+        }
     }
 }
