@@ -66,9 +66,10 @@ impl TimeScrubber {
 
         match self.total_duration {
             Some(total_duration) => {
-                let start_instant = Instant::now();
                 let mut current_measure: usize = 0;
                 let mut current_division: usize = 0;
+                let mut last_sent_measure: Option<usize> = None;
+                let mut last_sent_division: Option<usize> = None;
 
                 // Loop until the elapsed time exceeds the total duration or all measures are played
                 while self.elapsed().as_secs_f32() < total_duration.as_secs_f32()
@@ -87,26 +88,25 @@ impl TimeScrubber {
                         break; // Prevent out-of-bounds access
                     }
 
-                    // println!(
-                    //     "Current measure: {}, Current division: {}",
-                    //     current_measure, current_division
-                    // );
+                    // Only send notes if we have not already sent for this measure and division
+                    if Some(current_measure) != last_sent_measure
+                        || Some(current_division) != last_sent_division
+                    {
+                        let measure = &score.measures[current_measure];
+                        let notes_map = &measure.positions[current_division];
 
-                    let measure = &score.measures[current_measure];
-                    let notes_map = &measure.positions[current_division];
+                        // Convert HashMap<NoteKey, Note> to Vec<Note>
+                        let notes: Vec<Note> = notes_map.values().cloned().collect();
+                        println!("{}", current_division);
+                        // Send the notes to the receiver
+                        if tx.send(notes).is_err() {
+                            println!("Receiver has been dropped. Stopping playback.");
+                            break;
+                        }
 
-                    // Convert HashMap<NoteKey, Note> to Vec<Note>
-                    let notes: Vec<Note> = notes_map.values().cloned().collect();
-
-                    // println!("Number of notes at position: {}", notes.len());
-                    // for note in &notes {
-                    //     println!("{}", note);
-                    // }
-
-                    // Send the notes to the receiver
-                    if tx.send(notes).is_err() {
-                        println!("Receiver has been dropped. Stopping playback.");
-                        break;
+                        // Update last sent measure and division
+                        last_sent_measure = Some(current_measure);
+                        last_sent_division = Some(current_division);
                     }
 
                     // Sleep for a short duration to prevent tight looping
