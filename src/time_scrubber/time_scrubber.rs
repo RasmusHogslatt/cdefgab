@@ -10,20 +10,29 @@ pub struct TimeScrubber {
     pub start_time: Option<Instant>,
     pub total_duration: Option<Duration>,
     pub elapsed_since_start: Duration,
+    pub seconds_per_division: f32,
+    pub seconds_per_beat: f32,
 }
 
 impl TimeScrubber {
-    pub fn new(score: &Score) -> Self {
+    pub fn new(score: &Score, tempo: Option<usize>) -> Self {
+        let mut seconds_per_beat = 60.0 / score.tempo as f32;
+        let mut seconds_per_division = seconds_per_beat / score.divisions_per_quarter as f32;
+        if let Some(custom_tempo) = tempo {
+            seconds_per_beat = 60.0 / custom_tempo as f32;
+            seconds_per_division = seconds_per_beat / score.divisions_per_quarter as f32;
+        }
         let total_duration: Duration = Duration::from_secs_f32(
-            score.measures.len() as f32
-                * score.seconds_per_division
-                * score.divisions_per_measure as f32,
+            score.measures.len() as f32 * seconds_per_division * score.divisions_per_measure as f32,
         );
+
         println!("Total duration: {} seconds", total_duration.as_secs_f32());
         Self {
             start_time: None,
             total_duration: Some(total_duration),
             elapsed_since_start: Duration::ZERO,
+            seconds_per_division,
+            seconds_per_beat,
         }
     }
 
@@ -66,8 +75,8 @@ impl TimeScrubber {
         stop_flag: Arc<AtomicBool>,
     ) {
         self.start();
-        let seconds_per_division = score.seconds_per_division;
-        let seconds_per_measure = seconds_per_division * score.divisions_per_measure as f32;
+
+        let seconds_per_measure = self.seconds_per_division * score.divisions_per_measure as f32;
         println!("Seconds per measure: {}", seconds_per_measure);
 
         match self.total_duration {
@@ -85,7 +94,8 @@ impl TimeScrubber {
                     let elapsed = self.elapsed().as_secs_f32();
 
                     // Calculate which measure and division we are currently in
-                    let total_divisions_elapsed = (elapsed / seconds_per_division).floor() as usize;
+                    let total_divisions_elapsed =
+                        (elapsed / self.seconds_per_division).floor() as usize;
                     current_measure =
                         total_divisions_elapsed / score.divisions_per_measure as usize;
                     current_division =

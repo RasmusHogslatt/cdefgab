@@ -8,28 +8,32 @@ use std::{
 };
 
 use crate::{
-    music_representation::musical_structures::{self, Note, Score},
+    music_representation::musical_structures::{Note, Score},
     renderer::*,
-    time_scrubber::time_scrubber::TimeScrubber,
+    time_scrubber::{self, time_scrubber::TimeScrubber},
 };
 use eframe::egui;
 use egui::ScrollArea;
 use renderer::render_score;
 
 pub struct Configs {
-    pub custom_tempo: Option<u8>,
+    pub custom_tempo: usize,
+    pub use_custom_tempo: bool,
     pub file_path: Option<String>,
     pub measures_per_row: usize,
     pub dashes_per_division: usize,
+    pub total_score_time: f32,
 }
 
 impl Configs {
     pub fn new() -> Self {
         Self {
-            custom_tempo: None,
+            custom_tempo: 120,
+            use_custom_tempo: false,
             file_path: Some("silent.xml".to_owned()),
             measures_per_row: 4,
             dashes_per_division: 4,
+            total_score_time: 0.0,
         }
     }
 }
@@ -85,8 +89,12 @@ impl TabApp {
             self.stop_flag.store(false, Ordering::Relaxed);
             let stop_flag = self.stop_flag.clone();
 
+            let mut tempo: Option<usize> = Some(score.tempo);
+            if self.configs.use_custom_tempo {
+                tempo = Some(self.configs.custom_tempo);
+            }
             self.playback_handle = Some(thread::spawn(move || {
-                let mut scrubber = TimeScrubber::new(&score);
+                let mut scrubber = TimeScrubber::new(&score, tempo);
                 scrubber.simulate_playback(&score, tx, stop_flag);
             }));
 
@@ -120,6 +128,37 @@ impl eframe::App for TabApp {
             if ui.button("Stop").clicked() {
                 self.stop_playback();
             }
+
+            ui.heading("Settings");
+            ui.checkbox(&mut self.configs.use_custom_tempo, "Custom tempo");
+            if self.configs.use_custom_tempo {
+                ui.add(egui::Slider::new(&mut self.configs.custom_tempo, 1..=240));
+            }
+            ui.heading("Score info");
+
+            match (self.configs.use_custom_tempo, self.score.clone().unwrap()) {
+                (true, score) => {
+                    let seconds_per_beat = 60.0 / self.configs.custom_tempo as f32;
+                    let seconds_per_division =
+                        seconds_per_beat / score.divisions_per_quarter as f32;
+                    self.configs.total_score_time = score.measures.len() as f32
+                        * seconds_per_division
+                        * score.divisions_per_measure as f32;
+                }
+                (false, score) => {
+                    let seconds_per_beat = 60.0 / score.tempo as f32;
+                    let seconds_per_division =
+                        seconds_per_beat / score.divisions_per_quarter as f32;
+                    self.configs.total_score_time = score.measures.len() as f32
+                        * seconds_per_division
+                        * score.divisions_per_measure as f32;
+                }
+            }
+
+            ui.label(format!(
+                "Total score time: {}",
+                self.configs.total_score_time
+            ));
 
             ui.separator();
 

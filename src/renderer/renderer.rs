@@ -15,8 +15,6 @@ pub fn score_info(score: &Score) {
     );
     println!("Divisions per measure: {}", score.divisions_per_measure);
     println!("Number of measures: {}", score.measures.len());
-    println!("Seconds per division: {}", score.seconds_per_division);
-    println!("Seconds per beat: {}", score.seconds_per_beat);
     println!("----------------------");
 }
 

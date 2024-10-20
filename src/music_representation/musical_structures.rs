@@ -27,10 +27,8 @@ struct VoiceState {
 pub struct Score {
     pub measures: Vec<Measure>,
     pub time_signature: TimeSignature,
-    pub tempo: u8,
+    pub tempo: usize,
     pub divisions_per_quarter: u8,
-    pub seconds_per_beat: f32, // seconds_per_beat = 60 / tempo (Given parsed tempo, should allow for custom tempo)
-    pub seconds_per_division: f32, // seconds_per_beat / divisions_per_quarter (Given parsed tempo, should allow for custom tempo)
     pub divisions_per_measure: u8,
 }
 
@@ -139,12 +137,11 @@ impl Score {
         let tempo = root
             .descendants()
             .find(|n| n.has_tag_name("sound") && n.attribute("tempo").is_some())
-            .and_then(|n| n.attribute("tempo").map(|t| t.parse::<u8>().unwrap_or(120)))
+            .and_then(|n| {
+                n.attribute("tempo")
+                    .map(|t| t.parse::<usize>().unwrap_or(120))
+            })
             .unwrap_or(120);
-
-        // Calculate seconds per beat and per division
-        let seconds_per_beat = 60.0 / tempo as f32;
-        let seconds_per_division = seconds_per_beat / divisions_per_quarter as f32;
 
         let time_signature = TimeSignature {
             beats_per_measure,
@@ -321,8 +318,6 @@ impl Score {
             time_signature,
             tempo,
             divisions_per_quarter,
-            seconds_per_beat,
-            seconds_per_division,
             divisions_per_measure: divisions_per_measure as u8,
         })
     }
