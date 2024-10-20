@@ -1,4 +1,6 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -57,8 +59,12 @@ impl TimeScrubber {
         }
     }
 
-    pub fn simulate_playback(&mut self, score: &Score, tx: Sender<Vec<Note>>) {
-        // Start playback
+    pub fn simulate_playback(
+        &mut self,
+        score: &Score,
+        tx: Sender<Vec<Note>>,
+        stop_flag: Arc<AtomicBool>,
+    ) {
         self.start();
         let seconds_per_division = score.seconds_per_division;
         let seconds_per_measure = seconds_per_division * score.divisions_per_measure as f32;
@@ -74,6 +80,7 @@ impl TimeScrubber {
                 // Loop until the elapsed time exceeds the total duration or all measures are played
                 while self.elapsed().as_secs_f32() < total_duration.as_secs_f32()
                     && current_measure < score.measures.len()
+                    && !stop_flag.load(Ordering::Relaxed)
                 {
                     let elapsed = self.elapsed().as_secs_f32();
 
