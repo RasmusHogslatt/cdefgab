@@ -94,9 +94,9 @@ impl Measure {
 }
 
 impl Score {
-    pub fn parse_from_musicxml(file_path: &str) -> Result<Score, String> {
+    pub fn parse_from_musicxml(file_path: String) -> Result<Score, String> {
         // Read the MusicXML file content
-        let mut file = File::open(file_path).map_err(|e| e.to_string())?;
+        let mut file = File::open(file_path.as_str()).map_err(|e| e.to_string())?;
         let mut xml_content = String::new();
         file.read_to_string(&mut xml_content)
             .map_err(|e| e.to_string())?;

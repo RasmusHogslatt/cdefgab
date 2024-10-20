@@ -13,28 +13,49 @@ use crate::{
     time_scrubber::time_scrubber::TimeScrubber,
 };
 use eframe::egui;
-use egui::{mutex::Mutex, ScrollArea};
+use egui::ScrollArea;
 use renderer::render_score;
+
+pub struct Configs {
+    pub custom_tempo: Option<u8>,
+    pub file_path: Option<String>,
+    pub measures_per_row: usize,
+    pub dashes_per_division: usize,
+}
+
+impl Configs {
+    pub fn new() -> Self {
+        Self {
+            custom_tempo: None,
+            file_path: Some("silent.xml".to_owned()),
+            measures_per_row: 4,
+            dashes_per_division: 4,
+        }
+    }
+}
 
 pub struct TabApp {
     score: Option<Score>,
     tab_text: Option<String>,
     playback_handle: Option<thread::JoinHandle<()>>,
     notes_receiver: Option<Receiver<Vec<Note>>>,
-    playing_notes: Arc<Mutex<Vec<Note>>>,
     is_playing: bool,
     stop_flag: Arc<AtomicBool>,
+    pub configs: Configs,
+    pub previous_notes: Option<Vec<Note>>,
+    pub current_notes: Option<Vec<Note>>,
 }
 
 impl TabApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let file_path = "greensleeves.xml";
+        let configs = Configs::new();
+        let file_path = configs.file_path.clone().unwrap_or_default();
         let score = Score::parse_from_musicxml(file_path).expect("Failed to parse MusicXML");
-
-        // Render the tab text
-        let measures_per_row = 4;
-        let dashes_per_division = 4; // Adjust as needed
-        let tab_text = render_score(&score, measures_per_row, dashes_per_division);
+        let tab_text = render_score(
+            &score,
+            configs.measures_per_row,
+            configs.dashes_per_division,
+        );
 
         // Initialize the stop flag
         let stop_flag = Arc::new(AtomicBool::new(false));
@@ -44,14 +65,14 @@ impl TabApp {
             tab_text: Some(tab_text),
             playback_handle: None,
             notes_receiver: None,
-            playing_notes: Arc::new(Mutex::new(Vec::new())),
             is_playing: false,
             stop_flag,
+            configs,
+            previous_notes: None,
+            current_notes: None,
         }
     }
-}
 
-impl TabApp {
     fn start_playback(&mut self) {
         if self.is_playing {
             return;
@@ -80,7 +101,8 @@ impl TabApp {
                 let _ = handle.join();
             }
             self.is_playing = false;
-            self.playing_notes.lock().clear();
+            self.current_notes = None;
+            self.previous_notes = None;
         }
     }
 }
@@ -101,18 +123,30 @@ impl eframe::App for TabApp {
 
             ui.separator();
 
-            ui.heading("Currently Playing Notes:");
-            let playing_notes = self.playing_notes.lock();
-            for note in playing_notes.iter() {
-                if let (Some(string), Some(fret)) = (note.string, note.fret) {
-                    ui.label(format!("String: {}, Fret: {}", string, fret));
+            ui.label("Currently Playing Notes:");
+            if let Some(current_notes) = &self.current_notes {
+                for note in current_notes.iter() {
+                    if let (Some(string), Some(fret)) = (note.string, note.fret) {
+                        ui.label(format!("String: {}, Fret: {}", string, fret));
+                    }
+                }
+            }
+
+            ui.separator();
+
+            ui.label("Previous Notes:");
+            if let Some(previous_notes) = &self.previous_notes {
+                for note in previous_notes.iter() {
+                    if let (Some(string), Some(fret)) = (note.string, note.fret) {
+                        ui.label(format!("String: {}, Fret: {}", string, fret));
+                    }
                 }
             }
         });
 
         // Central panel to display the tabs
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Tabs");
+            ui.heading("Tablature");
             if let Some(tab_text) = &self.tab_text {
                 ScrollArea::vertical().show(ui, |ui| {
                     ui.monospace(tab_text);
@@ -123,8 +157,11 @@ impl eframe::App for TabApp {
         // Receive notes from the playback thread without blocking
         if let Some(receiver) = &self.notes_receiver {
             while let Ok(notes) = receiver.try_recv() {
-                let mut playing_notes = self.playing_notes.lock();
-                *playing_notes = notes;
+                if !notes.is_empty() {
+                    // Update previous and current notes
+                    self.previous_notes = self.current_notes.take();
+                    self.current_notes = Some(notes);
+                }
             }
             // Request repaint to update the UI
             ctx.request_repaint();
@@ -133,7 +170,8 @@ impl eframe::App for TabApp {
         // Check if playback has finished
         if self.is_playing && self.stop_flag.load(Ordering::Relaxed) {
             self.is_playing = false;
-            self.playing_notes.lock().clear();
+            self.current_notes = None;
+            self.previous_notes = None;
         }
     }
 }
