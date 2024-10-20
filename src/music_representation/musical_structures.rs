@@ -29,8 +29,8 @@ pub struct Score {
     pub time_signature: TimeSignature,
     pub tempo: u8,
     pub divisions_per_quarter: u8,
-    pub seconds_per_beat: f32,     // seconds_per_beat = 60 / tempo
-    pub seconds_per_division: f32, // seconds_per_beat / divisions_per_quarter
+    pub seconds_per_beat: f32, // seconds_per_beat = 60 / tempo (Given parsed tempo, should allow for custom tempo)
+    pub seconds_per_division: f32, // seconds_per_beat / divisions_per_quarter (Given parsed tempo, should allow for custom tempo)
     pub divisions_per_measure: u8,
 }
 

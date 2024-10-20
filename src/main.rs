@@ -1,19 +1,24 @@
 // main.rs
+mod gui;
 mod music_representation;
 mod renderer;
 mod time_scrubber;
-use std::env;
 use std::sync::mpsc;
 use std::thread;
 
+use gui::gui::TabApp;
 use music_representation::musical_structures::{Note, Score};
 use renderer::renderer::{render_score, score_info};
 use time_scrubber::time_scrubber::TimeScrubber;
 
 fn main() {
-    // Get the MusicXML file path from command-line arguments or use a default
-
-    let file_path = "silent.xml";
+    let native_options = eframe::NativeOptions::default();
+    let _ = eframe::run_native(
+        "Tab App",
+        native_options,
+        Box::new(|cc| Ok(Box::new(TabApp::new(cc)))),
+    );
+    let file_path = "greensleeves.xml";
 
     // Parse the MusicXML file
     let score = Score::parse_from_musicxml(file_path).expect("Failed to parse MusicXML");
