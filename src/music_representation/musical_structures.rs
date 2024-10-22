@@ -16,7 +16,7 @@ pub struct NoteKey {
     pub fret: u8,
 }
 
-struct VoiceState {
+pub struct VoiceState {
     current_position: usize,
     prev_duration: u32,
     prev_is_chord: bool,
@@ -113,22 +113,8 @@ impl Score {
         })
     }
 }
-// fn parse_xml_content(file_path: &str) -> Result<(Document, String), String> {
-//     // Read and clean the XML content
-//     let mut file = File::open(file_path).map_err(|e| e.to_string())?;
-//     let mut xml_content = String::new();
-//     file.read_to_string(&mut xml_content)
-//         .map_err(|e| e.to_string())?;
 
-//     let dtd_regex = Regex::new(r"(?s)<!DOCTYPE.*?>").unwrap();
-//     let xml_content = dtd_regex.replace(&xml_content, "").to_string();
-
-//     // Parse the XML content
-//     let doc = Document::parse(&xml_content).map_err(|e| e.to_string())?;
-
-//     Ok((doc, xml_content))
-// }
-fn extract_score_metadata(root: &Node) -> (u8, TimeSignature, usize) {
+pub fn extract_score_metadata(root: &Node) -> (u8, TimeSignature, usize) {
     let divisions_per_quarter = root
         .descendants()
         .find(|n| n.has_tag_name("divisions"))
@@ -171,14 +157,14 @@ fn extract_score_metadata(root: &Node) -> (u8, TimeSignature, usize) {
 
     (divisions_per_quarter, time_signature, tempo)
 }
-fn calculate_divisions_per_measure(
+pub fn calculate_divisions_per_measure(
     beats_per_measure: u8,
     divisions_per_quarter: u8,
     beat_value: u8,
 ) -> usize {
     (beats_per_measure as usize) * (divisions_per_quarter as usize) * 4 / (beat_value as usize)
 }
-fn parse_measures(root: &Node, divisions_per_measure: usize) -> Result<Vec<Measure>, String> {
+pub fn parse_measures(root: &Node, divisions_per_measure: usize) -> Result<Vec<Measure>, String> {
     let mut measures = Vec::new();
 
     for part in root.children().filter(|n| n.has_tag_name("part")) {
@@ -190,7 +176,7 @@ fn parse_measures(root: &Node, divisions_per_measure: usize) -> Result<Vec<Measu
 
     Ok(measures)
 }
-fn parse_measure(measure_node: Node, divisions_per_measure: usize) -> Result<Measure, String> {
+pub fn parse_measure(measure_node: Node, divisions_per_measure: usize) -> Result<Measure, String> {
     let mut measure = Measure::new(divisions_per_measure);
     let mut voice_states: HashMap<u8, VoiceState> = HashMap::new();
 
@@ -200,7 +186,7 @@ fn parse_measure(measure_node: Node, divisions_per_measure: usize) -> Result<Mea
 
     Ok(measure)
 }
-fn parse_note(
+pub fn parse_note(
     note_node: Node,
     voice_states: &mut HashMap<u8, VoiceState>,
     measure: &mut Measure,
@@ -254,7 +240,7 @@ fn parse_note(
 
     Ok(())
 }
-fn extract_pitch(note_node: &Node) -> Option<Pitch> {
+pub fn extract_pitch(note_node: &Node) -> Option<Pitch> {
     if let Some(pitch_node) = note_node.children().find(|n| n.has_tag_name("pitch")) {
         let step = pitch_node
             .children()
@@ -283,7 +269,7 @@ fn extract_pitch(note_node: &Node) -> Option<Pitch> {
         None
     }
 }
-fn extract_technical_info(note_node: &Node, pitch: &Option<Pitch>) -> (Option<u8>, Option<u8>) {
+pub fn extract_technical_info(note_node: &Node, pitch: &Option<Pitch>) -> (Option<u8>, Option<u8>) {
     let technical = note_node
         .children()
         .find(|n| n.has_tag_name("notations"))
@@ -308,7 +294,7 @@ fn extract_technical_info(note_node: &Node, pitch: &Option<Pitch>) -> (Option<u8
     }
 }
 
-fn calculate_string_and_fret(pitch: &Pitch) -> Option<(u8, u8)> {
+pub fn calculate_string_and_fret(pitch: &Pitch) -> Option<(u8, u8)> {
     // Define standard tuning pitches for each string
     let string_pitches = [
         Pitch {
@@ -355,7 +341,7 @@ fn calculate_string_and_fret(pitch: &Pitch) -> Option<(u8, u8)> {
     None
 }
 
-fn calculate_fret(open_string_pitch: &Pitch, note_pitch: &Pitch) -> Option<u8> {
+pub fn calculate_fret(open_string_pitch: &Pitch, note_pitch: &Pitch) -> Option<u8> {
     let open_midi = pitch_to_midi(open_string_pitch);
     let note_midi = pitch_to_midi(note_pitch);
     if note_midi >= open_midi {
@@ -365,7 +351,7 @@ fn calculate_fret(open_string_pitch: &Pitch, note_pitch: &Pitch) -> Option<u8> {
     }
 }
 
-fn pitch_to_midi(pitch: &Pitch) -> u8 {
+pub fn pitch_to_midi(pitch: &Pitch) -> u8 {
     let step_to_semitone = |step: char| match step {
         'C' => 0,
         'D' => 2,

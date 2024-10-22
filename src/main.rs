@@ -1,4 +1,5 @@
 // main.rs
+mod audio_player;
 mod gui;
 mod music_representation;
 mod renderer;

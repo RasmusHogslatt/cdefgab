@@ -1,0 +1,141 @@
+# main
+mod playback;
+mod listening;
+
+use rand::Rng;
+use std::thread;
+use std::time::Duration;
+
+fn main() {
+    // Start the listener in a separate thread
+    let listener_thread = thread::spawn(|| {
+        listening::listen_audio_thread();
+    });
+
+    // Start a playback thread that plays notes at random intervals
+    let playback_thread = thread::spawn(|| {
+        let mut rng = rand::thread_rng();
+        loop {
+            let frequency = rng.gen_range(220.0..880.0); // Random frequency between 220 Hz and 880 Hz
+            let duration = rng.gen_range(1..4); // Random duration between 1 and 3 seconds
+            println!("Playing note: {} Hz for {} seconds", frequency, duration);
+            playback::play_note_thread(frequency, duration);
+
+            let sleep_duration = rng.gen_range(2..6); // Wait 2-5 seconds before playing next note
+            thread::sleep(Duration::from_secs(sleep_duration));
+        }
+    });
+
+    // Join the threads (the listener thread runs indefinitely)
+    listener_thread.join().expect("Listener thread panicked");
+    playback_thread.join().expect("Playback thread panicked");
+}
+
+# listener
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+
+pub fn listen_audio_thread() {
+    let host = cpal::default_host();
+    let device = host.default_input_device().expect("Failed to find an input device");
+    let config = device.default_input_config().unwrap();
+
+    let stream = match config.sample_format() {
+        cpal::SampleFormat::F32 => device.build_input_stream(
+            &config.into(),
+            move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                process_input_data(data);
+            },
+            err_fn,
+        ),
+        cpal::SampleFormat::I16 => device.build_input_stream(
+            &config.into(),
+            move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                process_input_data(data);
+            },
+            err_fn,
+        ),
+        cpal::SampleFormat::U16 => device.build_input_stream(
+            &config.into(),
+            move |data: &[u16], _: &cpal::InputCallbackInfo| {
+                process_input_data(data);
+            },
+            err_fn,
+        ),
+    }.expect("Failed to create input stream");
+
+    stream.play().expect("Failed to play input stream");
+
+    // This keeps the thread alive to continue listening
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
+
+fn process_input_data<T>(input: &[T])
+where
+    T: cpal::Sample,
+{
+    println!("Received audio data with {} samples", input.len());
+    // Perform any processing you need here
+}
+
+fn err_fn(err: cpal::StreamError) {
+    eprintln!("an error occurred on the input audio stream: {}", err);
+}
+
+#player
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use std::f32::consts::PI;
+
+pub fn play_note_thread(frequency: f32, duration_secs: u64) {
+    let host = cpal::default_host();
+    let device = host.default_output_device().expect("Failed to find an output device");
+    let config = device.default_output_config().unwrap();
+
+    let sample_rate = config.sample_rate().0 as f32;
+    let mut sample_clock = 0f32;
+    let amplitude = 0.5;
+
+    let stream = match config.sample_format() {
+        cpal::SampleFormat::F32 => device.build_output_stream(
+            &config.into(),
+            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                write_data(data, sample_rate, frequency, amplitude, &mut sample_clock)
+            },
+            err_fn,
+        ),
+        cpal::SampleFormat::I16 => device.build_output_stream(
+            &config.into(),
+            move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
+                write_data(data, sample_rate, frequency, amplitude, &mut sample_clock)
+            },
+            err_fn,
+        ),
+        cpal::SampleFormat::U16 => device.build_output_stream(
+            &config.into(),
+            move |data: &mut [u16], _: &cpal::OutputCallbackInfo| {
+                write_data(data, sample_rate, frequency, amplitude, &mut sample_clock)
+            },
+            err_fn,
+        ),
+    }.expect("Failed to create output stream");
+
+    stream.play().expect("Failed to play stream");
+    std::thread::sleep(std::time::Duration::from_secs(duration_secs));
+}
+
+fn write_data<T>(output: &mut [T], sample_rate: f32, frequency: f32, amplitude: f32, sample_clock: &mut f32)
+where
+    T: cpal::Sample,
+{
+    let two_pi = 2.0 * PI;
+    for sample in output.iter_mut() {
+        let value = (two_pi * frequency * *sample_clock / sample_rate).sin() * amplitude;
+        *sample = cpal::Sample::from::<f32>(&value);
+        *sample_clock += 1.0;
+    }
+}
+
+fn err_fn(err: cpal::StreamError) {
+    eprintln!("an error occurred on the output audio stream: {}", err);
+}

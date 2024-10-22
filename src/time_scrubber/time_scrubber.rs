@@ -1,7 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::music_representation::musical_structures::{Measure, Note, Score};
@@ -88,8 +87,6 @@ impl TimeScrubber {
                     last_sent_measure = Some(current_measure);
                     last_sent_division = Some(current_division);
                 }
-
-                thread::sleep(Duration::from_millis(10));
             }
         } else {
             println!("Can't simulate as total_duration is not set.");
@@ -98,7 +95,7 @@ impl TimeScrubber {
         self.stop();
     }
 
-    fn calculate_current_time(
+    pub fn calculate_current_time(
         &self,
         elapsed: f32,
         divisions_per_measure: usize,
@@ -110,7 +107,7 @@ impl TimeScrubber {
         (current_measure.min(total_measures - 1), current_division)
     }
 
-    fn send_notes(&self, measure: &Measure, current_division: usize, tx: &Sender<Vec<Note>>) {
+    pub fn send_notes(&self, measure: &Measure, current_division: usize, tx: &Sender<Vec<Note>>) {
         let notes_map = &measure.positions[current_division];
         let notes: Vec<Note> = notes_map.values().cloned().collect();
 
