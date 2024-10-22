@@ -1,10 +1,11 @@
-// main.rs
+use gui::gui::gui::TabApp;
+
+mod audio_listener;
 mod audio_player;
 mod gui;
 mod music_representation;
 mod renderer;
 mod time_scrubber;
-use gui::gui::TabApp;
 
 fn main() {
     let native_options = eframe::NativeOptions::default();
