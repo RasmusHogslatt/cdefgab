@@ -618,6 +618,7 @@ dependencies = [
  "cpal",
  "eframe",
  "egui",
+ "rand",
  "regex",
  "roxmltree",
  "tempfile",

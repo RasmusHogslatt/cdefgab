@@ -1,21 +1,22 @@
+// audio_player.rs
+
 pub mod audio_player {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     use cpal::{SampleFormat, Stream};
+    use rand::random;
+    use std::sync::{Arc, Mutex};
 
     use crate::music_representation::musical_structures::Note;
-    use std::collections::VecDeque;
-
-    use std::f32::consts::PI;
-    use std::sync::{Arc, Mutex};
 
     pub struct AudioPlayer {
         stream: Stream,
-        notes_queue: Arc<Mutex<VecDeque<(f32, f32)>>>, // (frequency, duration)
+        active_notes: Arc<Mutex<Vec<KarplusStrong>>>,
+        sample_rate: f32,
+        volume: Arc<Mutex<f32>>,
     }
 
     impl AudioPlayer {
         pub fn new() -> Self {
-            // Initialize the audio output stream
             let host = cpal::default_host();
             let device = host
                 .default_output_device()
@@ -24,15 +25,18 @@ pub mod audio_player {
             let sample_rate = config.sample_rate().0 as f32;
             let channels = config.channels() as usize;
 
-            let notes_queue = Arc::new(Mutex::new(VecDeque::new()));
-            let notes_queue_clone = notes_queue.clone();
+            let active_notes = Arc::new(Mutex::new(Vec::new()));
+            let active_notes_clone = active_notes.clone();
+
+            let volume = Arc::new(Mutex::new(0.5)); // Default volume
+            let volume_clone = volume.clone();
 
             let stream = match config.sample_format() {
                 SampleFormat::F32 => device
                     .build_output_stream(
                         &config.into(),
                         move |data: &mut [f32], _| {
-                            Self::write_data(data, channels, sample_rate, &notes_queue_clone);
+                            Self::write_data(data, channels, &active_notes_clone, &volume_clone);
                         },
                         |err| eprintln!("Stream error: {}", err),
                         None,
@@ -43,7 +47,9 @@ pub mod audio_player {
 
             Self {
                 stream,
-                notes_queue,
+                active_notes,
+                sample_rate,
+                volume,
             }
         }
 
@@ -54,25 +60,30 @@ pub mod audio_player {
         fn write_data(
             output: &mut [f32],
             channels: usize,
-            sample_rate: f32,
-            notes_queue: &Arc<Mutex<VecDeque<(f32, f32)>>>,
+            active_notes: &Arc<Mutex<Vec<KarplusStrong>>>,
+            volume: &Arc<Mutex<f32>>,
         ) {
-            let mut notes_queue = notes_queue.lock().unwrap();
+            let mut active_notes = active_notes.lock().unwrap();
+            let volume = *volume.lock().unwrap();
 
-            let mut sample_clock = 0f32;
             for frame in output.chunks_mut(channels) {
-                let value = if let Some((frequency, duration_samples)) = notes_queue.front_mut() {
-                    let value = (sample_clock * *frequency * 2.0 * PI / sample_rate).sin();
-                    sample_clock += 1.0;
-                    *duration_samples -= 1.0;
-                    if *duration_samples <= 0.0 {
-                        notes_queue.pop_front();
-                        sample_clock = 0.0;
+                let mut value = 0.0;
+
+                // Sum samples from all active notes
+                active_notes.retain_mut(|note| {
+                    if let Some(sample) = note.next_sample() {
+                        value += sample;
+                        true
+                    } else {
+                        false
                     }
-                    value
-                } else {
-                    0.0
-                };
+                });
+
+                // Apply volume
+                value *= volume;
+
+                // Prevent clipping
+                value = value.clamp(-1.0, 1.0);
 
                 for sample in frame.iter_mut() {
                     *sample = value;
@@ -81,27 +92,74 @@ pub mod audio_player {
         }
 
         fn calculate_frequency(string: u8, fret: u8) -> f32 {
-            // Standard tuning frequencies for open strings EADGBE
             let open_string_frequencies = [329.63, 246.94, 196.00, 146.83, 110.00, 82.41];
-            let string_index = (string - 1).min(5) as usize; // Ensure index is within bounds
+            let string_index = (string - 1).min(5) as usize;
             let open_frequency = open_string_frequencies[string_index];
-            // Each fret increases the frequency by a semitone (approximately 2^(1/12))
             let frequency = open_frequency * (2f32).powf(fret as f32 / 12.0);
             frequency
         }
 
-        pub fn play_notes(&self, notes: &[Note]) {
-            let mut notes_queue = self.notes_queue.lock().unwrap();
+        pub fn play_notes_with_config(&self, notes: &[Note], decay: f32, volume: f32) {
+            // Update volume
+            {
+                let mut vol = self.volume.lock().unwrap();
+                *vol = volume;
+            }
+
+            let mut active_notes = self.active_notes.lock().unwrap();
             for note in notes {
                 if let (Some(string), Some(fret)) = (note.string, note.fret) {
                     let frequency = Self::calculate_frequency(string, fret);
-                    // Assume a fixed duration for simplicity, e.g., 0.5 seconds
                     let duration_seconds = 0.5;
-                    let sample_rate = 44100.0; // Adjust according to your configuration
-                    let duration_samples = duration_seconds * sample_rate;
-                    notes_queue.push_back((frequency, duration_samples));
+                    let ks =
+                        KarplusStrong::new(frequency, duration_seconds, self.sample_rate, decay);
+                    active_notes.push(ks);
                 }
             }
+        }
+    }
+
+    struct KarplusStrong {
+        buffer: Vec<f32>,
+        position: usize,
+        remaining_samples: usize,
+        decay: f32,
+    }
+
+    impl KarplusStrong {
+        fn new(frequency: f32, duration_seconds: f32, sample_rate: f32, decay: f32) -> Self {
+            let buffer_length = (sample_rate / frequency).ceil() as usize;
+            let mut buffer = Vec::with_capacity(buffer_length);
+
+            for _ in 0..buffer_length {
+                buffer.push(random::<f32>() * 2.0 - 1.0);
+            }
+
+            let remaining_samples = (duration_seconds * sample_rate) as usize;
+            KarplusStrong {
+                buffer,
+                position: 0,
+                remaining_samples,
+                decay,
+            }
+        }
+
+        fn next_sample(&mut self) -> Option<f32> {
+            if self.remaining_samples == 0 {
+                return None;
+            }
+
+            let current_value = self.buffer[self.position];
+            let next_index = (self.position + 1) % self.buffer.len();
+            let next_value = self.buffer[next_index];
+
+            let new_value = self.decay * 0.5 * (current_value + next_value);
+
+            self.buffer[self.position] = new_value;
+            self.position = next_index;
+            self.remaining_samples -= 1;
+
+            Some(current_value)
         }
     }
 }

@@ -25,6 +25,8 @@ pub mod gui {
         pub file_path: Option<String>,
         pub measures_per_row: usize,
         pub dashes_per_division: usize,
+        pub decay: f32,
+        pub volume: f32,
     }
 
     pub struct DisplayMetrics {
@@ -36,9 +38,11 @@ pub mod gui {
             Self {
                 custom_tempo: 120,
                 use_custom_tempo: false,
-                file_path: Some("silent.xml".to_owned()),
+                file_path: Some("greensleeves.xml".to_owned()),
                 measures_per_row: 4,
                 dashes_per_division: 4,
+                decay: 0.996,
+                volume: 0.5,
             }
         }
     }
@@ -163,6 +167,25 @@ pub mod gui {
                 if self.configs.use_custom_tempo {
                     ui.add(egui::Slider::new(&mut self.configs.custom_tempo, 1..=240));
                 }
+
+                ui.separator();
+                ui.heading("Audio Settings");
+
+                ui.horizontal(|ui| {
+                    ui.label("Decay:");
+                    ui.add(eframe::egui::Slider::new(
+                        &mut self.configs.decay,
+                        0.9..=1.0,
+                    ));
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Volume:");
+                    ui.add(eframe::egui::Slider::new(
+                        &mut self.configs.volume,
+                        0.0..=1.0,
+                    ));
+                });
                 ui.heading("Score info");
 
                 match (&self.configs.use_custom_tempo, &self.score) {
@@ -223,7 +246,7 @@ pub mod gui {
                 ui.heading("Parsed Score Info");
                 if let Some(score) = &self.score {
                     ScrollArea::vertical()
-                        .id_source("score_info_scroll_area")
+                        .id_salt("score_info_scroll_area")
                         .show(ui, |ui| {
                             ui.monospace(score_info(&score));
                         });
@@ -231,7 +254,7 @@ pub mod gui {
                 ui.heading("Tablature");
                 if let Some(tab_text) = &self.tab_text {
                     ScrollArea::vertical()
-                        .id_source("tab_scroll_area")
+                        .id_salt("tab_scroll_area")
                         .show(ui, |ui| {
                             ui.monospace(tab_text);
                         });
@@ -251,7 +274,11 @@ pub mod gui {
                         *expected_notes = Some(notes.clone());
 
                         // Play the notes
-                        self.audio_player.play_notes(&notes);
+                        self.audio_player.play_notes_with_config(
+                            &notes,
+                            self.configs.decay,
+                            self.configs.volume,
+                        );
                     }
                 }
                 // Request repaint to update the UI
