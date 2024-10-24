@@ -2,10 +2,8 @@ use core::fmt;
 use std::fs::File;
 use std::io::Read;
 
-extern crate roxmltree;
 use roxmltree::{Document, Node};
 
-extern crate regex;
 use regex::Regex;
 use std::collections::HashMap;
 

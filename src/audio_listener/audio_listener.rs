@@ -1,3 +1,5 @@
+// audio_listener.rs
+
 use crate::music_representation::musical_structures::{calculate_frequency, Note};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream};
@@ -8,8 +10,11 @@ pub struct AudioListener {
     stream: Option<Stream>,
     match_result_sender: Arc<Sender<f32>>,
     expected_notes: Arc<Mutex<Option<Vec<Note>>>>,
-    sample_rate: f32,
+    pub sample_rate: f32,
     input_buffer: Arc<Mutex<Vec<f32>>>,
+    // New fields for storing time-domain signals
+    pub input_signal_history: Arc<Mutex<Vec<Vec<f32>>>>,
+    pub expected_signal_history: Arc<Mutex<Vec<Vec<f32>>>>,
 }
 
 impl AudioListener {
@@ -28,12 +33,19 @@ impl AudioListener {
         // Initialize the input buffer
         let input_buffer = Arc::new(Mutex::new(Vec::new()));
 
+        // Initialize signal histories
+        let input_signal_history = Arc::new(Mutex::new(Vec::new()));
+        let expected_signal_history = Arc::new(Mutex::new(Vec::new()));
+
         Self {
             stream: None, // We'll set this in the start method
             match_result_sender: Arc::new(match_result_sender),
             expected_notes,
             sample_rate,
             input_buffer,
+            // Initialize new fields
+            input_signal_history,
+            expected_signal_history,
         }
     }
 
@@ -49,6 +61,8 @@ impl AudioListener {
         let match_result_sender = Arc::clone(&self.match_result_sender);
         let expected_notes = Arc::clone(&self.expected_notes);
         let input_buffer = Arc::clone(&self.input_buffer);
+        let input_signal_history = Arc::clone(&self.input_signal_history);
+        let expected_signal_history = Arc::clone(&self.expected_signal_history);
 
         let stream = match config.sample_format() {
             SampleFormat::F32 => device
@@ -62,6 +76,8 @@ impl AudioListener {
                             &match_result_sender,
                             &expected_notes,
                             &input_buffer,
+                            &input_signal_history,
+                            &expected_signal_history,
                         );
                     },
                     |err| eprintln!("Stream error: {}", err),
@@ -78,12 +94,28 @@ impl AudioListener {
         }
     }
 
+    fn process_mic_signal(&self, raw_mic_signal: Vec<f32>) -> Vec<f32> {
+        let normalized_mic = normalize_signal(&raw_mic_signal);
+        let mut input_history = self.input_signal_history.lock().unwrap();
+        input_history.push(normalized_mic.clone());
+        normalized_mic
+    }
+
+    fn process_expected_signal(&self, raw_expected_signal: Vec<f32>) -> Vec<f32> {
+        let normalized_expected = normalize_signal(&raw_expected_signal);
+        let mut expected_history = self.expected_signal_history.lock().unwrap();
+        expected_history.push(normalized_expected.clone());
+        normalized_expected
+    }
+
     fn process_audio_input(
         data: &[f32],
         sample_rate: f32,
         match_result_sender: &Arc<Sender<f32>>,
         expected_notes: &Arc<Mutex<Option<Vec<Note>>>>,
         input_buffer: &Arc<Mutex<Vec<f32>>>,
+        input_signal_history: &Arc<Mutex<Vec<Vec<f32>>>>,
+        expected_signal_history: &Arc<Mutex<Vec<Vec<f32>>>>,
     ) {
         // Append incoming data to the input buffer
         {
@@ -116,14 +148,13 @@ impl AudioListener {
             let expected_notes_clone = expected_notes_lock.clone();
             drop(expected_notes_lock); // Release the lock
 
-            // Perform FFT on the input signal
-            let input_spectrum = Self::compute_fft_magnitude(&input_signal);
-
             // Generate expected signal
             let expected_signal =
                 Self::generate_expected_signal(&expected_notes_clone, sample_rate, FRAME_SIZE);
 
             if let Some(expected_signal) = expected_signal {
+                // Perform FFT on the input signal
+                let input_spectrum = Self::compute_fft_magnitude(&input_signal);
                 // Compute FFT of expected signal
                 let expected_spectrum = Self::compute_fft_magnitude(&expected_signal);
 
@@ -137,6 +168,22 @@ impl AudioListener {
 
                 // Send similarity value
                 match_result_sender.send(similarity).ok();
+
+                // Store time-domain signals
+                {
+                    let mut input_signal_hist = input_signal_history.lock().unwrap();
+                    let mut expected_signal_hist = expected_signal_history.lock().unwrap();
+
+                    input_signal_hist.push(input_signal.clone());
+                    expected_signal_hist.push(expected_signal.clone());
+
+                    // Limit history size
+                    const MAX_HISTORY_LENGTH: usize = 100;
+                    if input_signal_hist.len() > MAX_HISTORY_LENGTH {
+                        input_signal_hist.remove(0);
+                        expected_signal_hist.remove(0);
+                    }
+                }
             } else {
                 // No expected signal to compare
                 match_result_sender.send(0.0).ok();
@@ -197,5 +244,16 @@ impl AudioListener {
         } else {
             0.0
         }
+    }
+}
+pub fn normalize_signal(signal: &Vec<f32>) -> Vec<f32> {
+    if signal.is_empty() {
+        return signal.clone();
+    }
+    let max_abs = signal.iter().fold(0.0_f32, |max, &x| max.max(x.abs()));
+    if max_abs == 0.0 {
+        signal.clone() // Avoid division by zero
+    } else {
+        signal.iter().map(|&x| x / max_abs).collect()
     }
 }

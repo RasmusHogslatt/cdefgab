@@ -20,6 +20,9 @@ use eframe::egui;
 use egui::ScrollArea;
 use renderer::{render_score, score_info};
 
+// Import the plot module from egui_plot
+use egui_plot::{Line, Plot, PlotPoints};
+
 pub struct Configs {
     pub custom_tempo: usize,
     pub use_custom_tempo: bool,
@@ -63,11 +66,14 @@ pub struct TabApp {
     pub current_notes: Option<Vec<Note>>,
     pub audio_player: AudioPlayer,
     pub audio_listener: AudioListener,
-    pub match_result_receiver: Receiver<f32>, // Changed to Receiver<f32>
+    pub match_result_receiver: Receiver<f32>,
     pub expected_notes: Arc<Mutex<Option<Vec<Note>>>>,
-    pub similarity: f32, // Changed from note_matched to similarity
-    pub is_match: bool,  // New field to store match status
+    pub similarity: f32,
+    pub is_match: bool,
     pub matching_threshold: Arc<Mutex<f32>>,
+    // New fields for accessing signal histories
+    pub input_signal_history: Arc<Mutex<Vec<Vec<f32>>>>,
+    pub expected_signal_history: Arc<Mutex<Vec<Vec<f32>>>>,
 }
 
 impl TabApp {
@@ -87,7 +93,7 @@ impl TabApp {
         // Initialize the stop flag
         let stop_flag = Arc::new(AtomicBool::new(false));
 
-        let audio_player = AudioPlayer::new();
+        let mut audio_player = AudioPlayer::new();
         audio_player.start();
 
         let (match_result_sender, match_result_receiver) = mpsc::channel();
@@ -96,6 +102,10 @@ impl TabApp {
         let mut audio_listener =
             AudioListener::new(match_result_sender.clone(), expected_notes.clone());
         audio_listener.start();
+
+        // Clone the signal histories before moving audio_listener
+        let input_signal_history = audio_listener.input_signal_history.clone();
+        let expected_signal_history = audio_listener.expected_signal_history.clone();
 
         Self {
             score: Some(score),
@@ -112,9 +122,12 @@ impl TabApp {
             audio_listener,
             match_result_receiver,
             expected_notes,
-            similarity: 0.0, // Initialize similarity
-            is_match: false, // Initialize is_match
+            similarity: 0.0,
+            is_match: false,
             matching_threshold,
+            // Initialize new fields
+            input_signal_history,
+            expected_signal_history,
         }
     }
 
@@ -184,25 +197,19 @@ impl eframe::App for TabApp {
 
             ui.horizontal(|ui| {
                 ui.label("Decay:");
-                ui.add(eframe::egui::Slider::new(
-                    &mut self.configs.decay,
-                    0.9..=1.0,
-                ));
+                ui.add(egui::Slider::new(&mut self.configs.decay, 0.9..=1.0));
             });
 
             ui.horizontal(|ui| {
                 ui.label("Volume:");
-                ui.add(eframe::egui::Slider::new(
-                    &mut self.configs.volume,
-                    0.0..=1.0,
-                ));
+                ui.add(egui::Slider::new(&mut self.configs.volume, 0.0..=1.0));
             });
 
             ui.horizontal(|ui| {
                 ui.label("Matching Threshold:");
-                ui.add(eframe::egui::Slider::new(
+                ui.add(egui::Slider::new(
                     &mut self.configs.matching_threshold,
-                    0.0..=1.0, // Adjusted range to [0.0, 1.0]
+                    0.0..=1.0,
                 ));
             });
 
@@ -261,9 +268,58 @@ impl eframe::App for TabApp {
                 ui.label(format!("Similarity: {:.3}", self.similarity));
                 ui.label(format!("Note Matched: {}", self.is_match));
             }
+
+            ui.heading("Live Signal Plot");
+
+            // Access the time-domain signals
+            let input_signal_hist = self.input_signal_history.lock().unwrap();
+            let expected_signal_hist = self.expected_signal_history.lock().unwrap();
+
+            if !input_signal_hist.is_empty() && !expected_signal_hist.is_empty() {
+                // Use the latest signals
+                let input_signal = &input_signal_hist[input_signal_hist.len() - 1];
+                let expected_signal = &expected_signal_hist[expected_signal_hist.len() - 1];
+
+                // Create plot points with time on the x-axis
+                let input_points: PlotPoints = input_signal
+                    .iter()
+                    .enumerate()
+                    .map(|(i, y)| {
+                        [
+                            (i as f64) / self.audio_listener.sample_rate as f64,
+                            *y as f64,
+                        ]
+                    })
+                    .collect();
+
+                let expected_points: PlotPoints = expected_signal
+                    .iter()
+                    .enumerate()
+                    .map(|(i, y)| {
+                        [
+                            (i as f64) / self.audio_listener.sample_rate as f64,
+                            *y as f64,
+                        ]
+                    })
+                    .collect();
+
+                // Create lines
+                let input_line = Line::new(input_points).name("Input Signal");
+                let expected_line = Line::new(expected_points).name("Expected Signal");
+
+                // Plot the lines
+                Plot::new("signals_plot")
+                    .legend(egui_plot::Legend::default())
+                    .show(ui, |plot_ui| {
+                        plot_ui.line(input_line);
+                        plot_ui.line(expected_line);
+                    });
+            } else {
+                ui.label("No data to display yet.");
+            }
         });
 
-        // Central panel to display the tabs
+        // Central panel to display the tabs and plots
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Parsed Score Info");
             if let Some(score) = &self.score {

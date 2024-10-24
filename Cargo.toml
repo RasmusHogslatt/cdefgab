@@ -6,9 +6,10 @@ edition = "2021"
 [dependencies]
 roxmltree = { version = "0.20" }
 tempfile = "3.3.0"
-regex = { version = "1.11" }
+regex = { version = "1.11.1" }
 eframe = { version = "0.29.1" }
 egui = { version = "0.29.1" }
+egui_plot = { version = "0.29" }
 cpal = { version = "0.15.3" }
 rand = "0.8"
 rustfft = { version = "6.2.0" }
