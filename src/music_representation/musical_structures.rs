@@ -365,3 +365,11 @@ pub fn pitch_to_midi(pitch: &Pitch) -> u8 {
     let semitone = step_to_semitone(pitch.step) + pitch.alter.unwrap_or(0);
     (pitch.octave * 12) + semitone as u8
 }
+
+pub fn calculate_frequency(string: u8, fret: u8) -> f32 {
+    let open_string_frequencies = [329.63, 246.94, 196.00, 146.83, 110.00, 82.41];
+    let string_index = (string - 1).min(5) as usize;
+    let open_frequency = open_string_frequencies[string_index];
+    let frequency = open_frequency * (2f32).powf(fret as f32 / 12.0);
+    frequency
+}

@@ -3,7 +3,7 @@ use cpal::{SampleFormat, Stream};
 use rand::random;
 use std::sync::{Arc, Mutex};
 
-use crate::music_representation::musical_structures::Note;
+use crate::music_representation::musical_structures::{calculate_frequency, Note};
 
 pub struct AudioPlayer {
     stream: Stream,
@@ -88,13 +88,13 @@ impl AudioPlayer {
         }
     }
 
-    fn calculate_frequency(string: u8, fret: u8) -> f32 {
-        let open_string_frequencies = [329.63, 246.94, 196.00, 146.83, 110.00, 82.41];
-        let string_index = (string - 1).min(5) as usize;
-        let open_frequency = open_string_frequencies[string_index];
-        let frequency = open_frequency * (2f32).powf(fret as f32 / 12.0);
-        frequency
-    }
+    // fn calculate_frequency(string: u8, fret: u8) -> f32 {
+    //     let open_string_frequencies = [329.63, 246.94, 196.00, 146.83, 110.00, 82.41];
+    //     let string_index = (string - 1).min(5) as usize;
+    //     let open_frequency = open_string_frequencies[string_index];
+    //     let frequency = open_frequency * (2f32).powf(fret as f32 / 12.0);
+    //     frequency
+    // }
 
     pub fn play_notes_with_config(&self, notes: &[Note], decay: f32, volume: f32) {
         // Update volume
@@ -106,7 +106,7 @@ impl AudioPlayer {
         let mut active_notes = self.active_notes.lock().unwrap();
         for note in notes {
             if let (Some(string), Some(fret)) = (note.string, note.fret) {
-                let frequency = Self::calculate_frequency(string, fret);
+                let frequency = calculate_frequency(string, fret);
                 let duration_seconds = 0.5;
                 let ks = KarplusStrong::new(frequency, duration_seconds, self.sample_rate, decay);
                 active_notes.push(ks);

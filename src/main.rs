@@ -1,4 +1,4 @@
-use gui::gui::gui::TabApp;
+use gui::gui::TabApp;
 
 mod audio_listener;
 mod audio_player;
