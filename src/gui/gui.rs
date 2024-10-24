@@ -9,8 +9,8 @@ pub mod gui {
     };
 
     use crate::{
-        audio_listener::audio_listener::audio_listener::AudioListener,
-        audio_player::audio_player::audio_player::AudioPlayer,
+        audio_listener::audio_listener::AudioListener,
+        audio_player::audio_player::AudioPlayer,
         music_representation::musical_structures::{Note, Score},
         renderer::*,
         time_scrubber::time_scrubber::TimeScrubber,
@@ -27,6 +27,7 @@ pub mod gui {
         pub dashes_per_division: usize,
         pub decay: f32,
         pub volume: f32,
+        pub matching_threshold: f32,
     }
 
     pub struct DisplayMetrics {
@@ -43,6 +44,7 @@ pub mod gui {
                 dashes_per_division: 4,
                 decay: 0.996,
                 volume: 0.5,
+                matching_threshold: 0.5,
             }
         }
     }
@@ -63,6 +65,7 @@ pub mod gui {
         pub match_result_receiver: Receiver<bool>,
         pub expected_notes: Arc<Mutex<Option<Vec<Note>>>>,
         pub note_matched: bool,
+        pub matching_threshold: Arc<Mutex<f32>>,
     }
 
     impl TabApp {
@@ -87,7 +90,12 @@ pub mod gui {
 
             let (match_result_sender, match_result_receiver) = mpsc::channel();
             let expected_notes = Arc::new(Mutex::new(None));
-            let audio_listener = AudioListener::new(match_result_sender, expected_notes.clone());
+            let matching_threshold = Arc::new(Mutex::new(configs.matching_threshold));
+            let audio_listener = AudioListener::new(
+                match_result_sender.clone(),
+                expected_notes.clone(),
+                matching_threshold.clone(),
+            );
             audio_listener.start();
 
             Self {
@@ -106,6 +114,7 @@ pub mod gui {
                 match_result_receiver,
                 expected_notes,
                 note_matched: false,
+                matching_threshold, // Add this line
             }
         }
 
@@ -184,6 +193,14 @@ pub mod gui {
                     ui.add(eframe::egui::Slider::new(
                         &mut self.configs.volume,
                         0.0..=1.0,
+                    ));
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Matching Threshold:");
+                    ui.add(eframe::egui::Slider::new(
+                        &mut self.configs.matching_threshold,
+                        0.0..=10.0,
                     ));
                 });
                 ui.heading("Score info");
@@ -297,6 +314,10 @@ pub mod gui {
                 self.is_playing = false;
                 self.current_notes = None;
                 self.previous_notes = None;
+            }
+            {
+                let mut threshold = self.matching_threshold.lock().unwrap();
+                *threshold = self.configs.matching_threshold;
             }
         }
     }
