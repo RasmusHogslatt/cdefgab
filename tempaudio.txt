@@ -1,1 +1,17 @@
-I am making a music program in rust. It parses musicxml to my own guitar tablature and renders it. It also has a time_scrubber that simulates the playback in time and sends the notes that should be played at a given time to the main function. In the main function, an audioplayer plays the notes so you can hear what the the song is meant to sound like using the karplus-strong algorithm. 
+I am making a musical program in rust. At the moment I am struggling to properly compare a generated audio signal against a real audio signal. I found an article that utilizes MFCC + DTW by using a pipeline like:
+1. Sample input
+2. Pre-emphasis
+3. Framing
+4. Windowing
+5. DFT
+6. Power Spectrum
+7. Mel's Filter bank
+8. Logarithm
+9. Discrete cosine transform
+10. Dynamic time warping
+11. Normalization
+12. Similarity between 0 to 1
+
+I wil provide my full source code below. Help me adjust my audio listener to implement this approach instead. Feel free to remove the current functions if they should be removed or rewritten. After doing that, make sure that the gui reflects the changes and make the plot show the relevant information for debugging. Note that I only want to update the status of whether the expected notes matched the input whenever a new musical "division" is entered, i.e. when the expected notes are updated.
+
+Here is my full source code:

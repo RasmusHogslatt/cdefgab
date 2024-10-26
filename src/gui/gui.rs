@@ -10,7 +10,7 @@ use std::{
 };
 
 use crate::{
-    audio_listener::audio_listener::AudioListener,
+    audio_listener::audio_listener::{AudioListener, SimilarityMetric},
     audio_player::audio_player::AudioPlayer,
     music_representation::musical_structures::{Note, Score},
     renderer::*,
@@ -99,8 +99,11 @@ impl TabApp {
         let (match_result_sender, match_result_receiver) = mpsc::channel();
         let expected_notes = Arc::new(Mutex::new(None));
         let matching_threshold = Arc::new(Mutex::new(configs.matching_threshold));
-        let mut audio_listener =
-            AudioListener::new(match_result_sender.clone(), expected_notes.clone());
+        let mut audio_listener = AudioListener::new(
+            match_result_sender.clone(),
+            expected_notes.clone(),
+            SimilarityMetric::Pearson,
+        );
         audio_listener.start();
 
         // Clone the signal histories before moving audio_listener
@@ -265,7 +268,7 @@ impl eframe::App for TabApp {
 
             ui.separator();
 
-            if let Some(notes) = &self.previous_notes {
+            if let Some(_notes) = &self.current_notes {
                 if self.is_playing {
                     ui.label(format!("Similarity: {:.3}", self.similarity));
                     ui.label(format!("Note Matched: {}", self.is_match));
