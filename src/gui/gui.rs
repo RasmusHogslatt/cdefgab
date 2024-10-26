@@ -1,5 +1,3 @@
-// gui.rs
-
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -102,7 +100,7 @@ impl TabApp {
         let mut audio_listener = AudioListener::new(
             match_result_sender.clone(),
             expected_notes.clone(),
-            SimilarityMetric::Pearson,
+            SimilarityMetric::Placeholder, // Use Placeholder metric
         );
         audio_listener.start();
 
