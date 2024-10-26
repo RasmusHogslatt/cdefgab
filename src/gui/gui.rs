@@ -93,7 +93,7 @@ impl TabApp {
         // Initialize the stop flag
         let stop_flag = Arc::new(AtomicBool::new(false));
 
-        let mut audio_player = AudioPlayer::new();
+        let audio_player = AudioPlayer::new();
         audio_player.start();
 
         let (match_result_sender, match_result_receiver) = mpsc::channel();
@@ -264,11 +264,16 @@ impl eframe::App for TabApp {
             }
 
             ui.separator();
-            if self.is_playing {
-                ui.label(format!("Similarity: {:.3}", self.similarity));
-                ui.label(format!("Note Matched: {}", self.is_match));
-            }
 
+            if let Some(notes) = &self.previous_notes {
+                if self.is_playing {
+                    ui.label(format!("Similarity: {:.3}", self.similarity));
+                    ui.label(format!("Note Matched: {}", self.is_match));
+                }
+            }
+        });
+
+        egui::Window::new("Plot").show(ctx, |ui| {
             ui.heading("Live Signal Plot");
 
             // Access the time-domain signals
@@ -318,7 +323,6 @@ impl eframe::App for TabApp {
                 ui.label("No data to display yet.");
             }
         });
-
         // Central panel to display the tabs and plots
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Parsed Score Info");

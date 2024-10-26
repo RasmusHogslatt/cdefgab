@@ -94,20 +94,6 @@ impl AudioListener {
         }
     }
 
-    fn process_mic_signal(&self, raw_mic_signal: Vec<f32>) -> Vec<f32> {
-        let normalized_mic = normalize_signal(&raw_mic_signal);
-        let mut input_history = self.input_signal_history.lock().unwrap();
-        input_history.push(normalized_mic.clone());
-        normalized_mic
-    }
-
-    fn process_expected_signal(&self, raw_expected_signal: Vec<f32>) -> Vec<f32> {
-        let normalized_expected = normalize_signal(&raw_expected_signal);
-        let mut expected_history = self.expected_signal_history.lock().unwrap();
-        expected_history.push(normalized_expected.clone());
-        normalized_expected
-    }
-
     fn process_audio_input(
         data: &[f32],
         sample_rate: f32,
@@ -124,7 +110,7 @@ impl AudioListener {
         }
 
         // Check if we have enough data to process (e.g., 2048 samples for FFT)
-        const FRAME_SIZE: usize = 2048;
+        const FRAME_SIZE: usize = 2048 * 2;
         const HOP_SIZE: usize = 512; // For overlapping frames
 
         loop {
@@ -134,7 +120,7 @@ impl AudioListener {
                 break;
             }
 
-            let input_signal = buffer[..FRAME_SIZE].to_vec();
+            let mut input_signal = buffer[..FRAME_SIZE].to_vec();
             // Remove the processed samples, keeping the overlap
             buffer.drain(..HOP_SIZE);
             drop(buffer); // Release the lock
@@ -151,17 +137,29 @@ impl AudioListener {
             // Generate expected signal
             let expected_signal =
                 Self::generate_expected_signal(&expected_notes_clone, sample_rate, FRAME_SIZE);
+            if let Some(mut expected_signal) = expected_signal {
+                println!(
+                    "Raw MIC: {:?}, Raw notes: {:?}",
+                    input_signal.len(),
+                    expected_signal.len()
+                );
+                // Normalize in time domain
+                input_signal = normalize_signal(&input_signal);
+                expected_signal = normalize_signal(&expected_signal);
 
-            if let Some(expected_signal) = expected_signal {
-                // Perform FFT on the input signal
+                // Perform FFT
                 let input_spectrum = Self::compute_fft_magnitude(&input_signal);
-                // Compute FFT of expected signal
                 let expected_spectrum = Self::compute_fft_magnitude(&expected_signal);
 
-                // Normalize spectra
-                let input_spectrum = Self::normalize_spectrum(&input_spectrum);
-                let expected_spectrum = Self::normalize_spectrum(&expected_spectrum);
+                // Normalize frequency domain
+                let input_spectrum = normalize_signal(&input_spectrum);
+                let expected_spectrum = normalize_signal(&expected_spectrum);
 
+                println!(
+                    "MIC spectra: {:?}, Notes spectra: {:?}",
+                    input_spectrum.len(),
+                    expected_spectrum.len()
+                );
                 // Compute similarity
                 let similarity =
                     Self::compute_cosine_similarity(&input_spectrum, &expected_spectrum);
@@ -169,13 +167,13 @@ impl AudioListener {
                 // Send similarity value
                 match_result_sender.send(similarity).ok();
 
-                // Store time-domain signals
+                // Store time-domain signals in Mutex Vec<f32> sent to gui
                 {
                     let mut input_signal_hist = input_signal_history.lock().unwrap();
                     let mut expected_signal_hist = expected_signal_history.lock().unwrap();
 
-                    input_signal_hist.push(input_signal.clone());
-                    expected_signal_hist.push(expected_signal.clone());
+                    input_signal_hist.push(input_spectrum.clone());
+                    expected_signal_hist.push(expected_spectrum.clone());
 
                     // Limit history size
                     const MAX_HISTORY_LENGTH: usize = 100;
@@ -220,15 +218,6 @@ impl AudioListener {
             signal.iter().map(|&s| Complex { re: s, im: 0.0 }).collect();
         fft.process(&mut buffer);
         buffer.iter().map(|c| c.norm()).collect()
-    }
-
-    fn normalize_spectrum(spectrum: &[f32]) -> Vec<f32> {
-        let max_value = spectrum.iter().cloned().fold(0.0, f32::max);
-        if max_value > 0.0 {
-            spectrum.iter().map(|&v| v / max_value).collect()
-        } else {
-            spectrum.to_vec()
-        }
     }
 
     fn compute_cosine_similarity(spectrum1: &[f32], spectrum2: &[f32]) -> f32 {
