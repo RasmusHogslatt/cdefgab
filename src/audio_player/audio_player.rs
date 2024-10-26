@@ -88,14 +88,6 @@ impl AudioPlayer {
         }
     }
 
-    // fn calculate_frequency(string: u8, fret: u8) -> f32 {
-    //     let open_string_frequencies = [329.63, 246.94, 196.00, 146.83, 110.00, 82.41];
-    //     let string_index = (string - 1).min(5) as usize;
-    //     let open_frequency = open_string_frequencies[string_index];
-    //     let frequency = open_frequency * (2f32).powf(fret as f32 / 12.0);
-    //     frequency
-    // }
-
     pub fn play_notes_with_config(&self, notes: &[Note], decay: f32, volume: f32) {
         // Update volume
         {
@@ -116,10 +108,10 @@ impl AudioPlayer {
 }
 
 pub struct KarplusStrong {
-    buffer: Vec<f32>,
-    position: usize,
-    remaining_samples: usize,
-    decay: f32,
+    pub buffer: Vec<f32>,
+    pub position: usize,
+    pub remaining_samples: usize,
+    pub decay: f32,
 }
 
 impl KarplusStrong {

@@ -443,6 +443,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "augurs-core"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3068ec405b40fa22026a3e2a4d8c061e85fa3d9b859e84351c7103fd0d0e6c52"
+
+[[package]]
+name = "augurs-dtw"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4df1b0135378e3268c09b977272e70ece2012dfb3719905e76269983e408c4b5"
+dependencies = [
+ "augurs-core",
+ "tracing",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -615,6 +631,7 @@ dependencies = [
 name = "cdefgab"
 version = "0.1.0"
 dependencies = [
+ "augurs-dtw",
  "cpal",
  "eframe",
  "egui",

@@ -1,3 +1,5 @@
+// gui.rs
+
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -69,7 +71,9 @@ pub struct TabApp {
     pub similarity: f32,
     pub is_match: bool,
     pub matching_threshold: Arc<Mutex<f32>>,
-    // New fields for accessing signal histories
+    // New fields for accessing chroma and signal feature histories
+    pub input_chroma_history: Arc<Mutex<Vec<Vec<f32>>>>,
+    pub expected_chroma_history: Arc<Mutex<Vec<Vec<f32>>>>,
     pub input_signal_history: Arc<Mutex<Vec<Vec<f32>>>>,
     pub expected_signal_history: Arc<Mutex<Vec<Vec<f32>>>>,
 }
@@ -100,11 +104,13 @@ impl TabApp {
         let mut audio_listener = AudioListener::new(
             match_result_sender.clone(),
             expected_notes.clone(),
-            SimilarityMetric::Placeholder, // Use Placeholder metric
+            SimilarityMetric::DTW, // Use DTW metric
         );
         audio_listener.start();
 
-        // Clone the signal histories before moving audio_listener
+        // Clone the chroma and signal feature histories before moving audio_listener
+        let input_chroma_history = audio_listener.input_chroma_history.clone();
+        let expected_chroma_history = audio_listener.expected_chroma_history.clone();
         let input_signal_history = audio_listener.input_signal_history.clone();
         let expected_signal_history = audio_listener.expected_signal_history.clone();
 
@@ -127,6 +133,8 @@ impl TabApp {
             is_match: false,
             matching_threshold,
             // Initialize new fields
+            input_chroma_history,
+            expected_chroma_history,
             input_signal_history,
             expected_signal_history,
         }
@@ -266,47 +274,79 @@ impl eframe::App for TabApp {
 
             ui.separator();
 
-            if let Some(_notes) = &self.current_notes {
-                if self.is_playing {
-                    ui.label(format!("Similarity: {:.3}", self.similarity));
-                    ui.label(format!("Note Matched: {}", self.is_match));
-                }
+            // Display similarity and match status only if a similarity score has been received
+            if self.is_playing && self.current_notes.is_some() {
+                ui.label(format!("Similarity: {:.3}", self.similarity));
+                ui.label(format!("Note Matched: {}", self.is_match));
             }
         });
 
-        egui::Window::new("Plot").show(ctx, |ui| {
-            ui.heading("Live Signal Plot");
+        // Window for Chroma Feature Plot
+        egui::Window::new("Chroma Plot").show(ctx, |ui| {
+            ui.heading("Live Chroma Feature Plot");
 
-            // Access the time-domain signals
+            // Access the chroma feature histories
+            let input_chroma_hist = self.input_chroma_history.lock().unwrap();
+            let expected_chroma_hist = self.expected_chroma_history.lock().unwrap();
+
+            if !input_chroma_hist.is_empty() && !expected_chroma_hist.is_empty() {
+                // Use the latest chroma features
+                let input_chroma = &input_chroma_hist[input_chroma_hist.len() - 1];
+                let expected_chroma = &expected_chroma_hist[expected_chroma_hist.len() - 1];
+
+                // Create plot points for chroma features
+                let input_points: PlotPoints = input_chroma
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &y)| [i as f64, y as f64])
+                    .collect();
+
+                let expected_points: PlotPoints = expected_chroma
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &y)| [i as f64, y as f64])
+                    .collect();
+
+                // Create lines
+                let input_line = Line::new(input_points).name("Input Chroma");
+                let expected_line = Line::new(expected_points).name("Expected Chroma");
+
+                // Plot the lines
+                Plot::new("chroma_plot")
+                    .legend(egui_plot::Legend::default())
+                    .show(ui, |plot_ui| {
+                        plot_ui.line(input_line);
+                        plot_ui.line(expected_line);
+                    });
+            } else {
+                ui.label("No chroma data to display yet.");
+            }
+        });
+
+        // Window for Time-Domain Signal Plot
+        egui::Window::new("Time-Domain Plot").show(ctx, |ui| {
+            ui.heading("Live Time-Domain Signal Plot");
+
+            // Access the raw signal histories
             let input_signal_hist = self.input_signal_history.lock().unwrap();
             let expected_signal_hist = self.expected_signal_history.lock().unwrap();
 
             if !input_signal_hist.is_empty() && !expected_signal_hist.is_empty() {
-                // Use the latest signals
+                // Use the latest raw signals
                 let input_signal = &input_signal_hist[input_signal_hist.len() - 1];
                 let expected_signal = &expected_signal_hist[expected_signal_hist.len() - 1];
 
-                // Create plot points with time on the x-axis
+                // Create plot points for raw signals
                 let input_points: PlotPoints = input_signal
                     .iter()
                     .enumerate()
-                    .map(|(i, y)| {
-                        [
-                            (i as f64) / self.audio_listener.sample_rate as f64,
-                            *y as f64,
-                        ]
-                    })
+                    .map(|(i, &y)| [i as f64, y as f64])
                     .collect();
 
                 let expected_points: PlotPoints = expected_signal
                     .iter()
                     .enumerate()
-                    .map(|(i, y)| {
-                        [
-                            (i as f64) / self.audio_listener.sample_rate as f64,
-                            *y as f64,
-                        ]
-                    })
+                    .map(|(i, &y)| [i as f64, y as f64])
                     .collect();
 
                 // Create lines
@@ -314,17 +354,18 @@ impl eframe::App for TabApp {
                 let expected_line = Line::new(expected_points).name("Expected Signal");
 
                 // Plot the lines
-                Plot::new("signals_plot")
+                Plot::new("time_domain_plot")
                     .legend(egui_plot::Legend::default())
                     .show(ui, |plot_ui| {
                         plot_ui.line(input_line);
                         plot_ui.line(expected_line);
                     });
             } else {
-                ui.label("No data to display yet.");
+                ui.label("No time-domain data to display yet.");
             }
         });
-        // Central panel to display the tabs and plots
+
+        // Central panel to display the tabs and other information
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Parsed Score Info");
             if let Some(score) = &self.score {
@@ -356,6 +397,12 @@ impl eframe::App for TabApp {
                     let mut expected_notes = self.expected_notes.lock().unwrap();
                     *expected_notes = Some(notes.clone());
 
+                    // Reset similarity computation flag
+                    {
+                        let mut computed = self.audio_listener.similarity_computed.lock().unwrap();
+                        *computed = false;
+                    }
+
                     // Play the notes
                     self.audio_player.play_notes_with_config(
                         &notes,
@@ -381,6 +428,15 @@ impl eframe::App for TabApp {
                 self.similarity = 0.0;
                 self.is_match = false;
             }
+        }
+
+        // Update the AudioListener's decay based on the GUI setting
+        {
+            let decay = self.configs.decay;
+            // Assuming you add a method to AudioListener to update decay
+            // e.g., self.audio_listener.set_decay(decay);
+            // Implement this method in AudioListener
+            self.audio_listener.set_decay(decay);
         }
 
         // Update the matching threshold in the listener
