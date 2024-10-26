@@ -352,13 +352,25 @@ impl eframe::App for TabApp {
                 // Create lines
                 let input_line = Line::new(input_points).name("Input Signal");
                 let expected_line = Line::new(expected_points).name("Expected Signal");
+                let difference_signal: Vec<f32> = input_signal
+                    .into_iter()
+                    .zip(expected_signal)
+                    .map(|(a, b)| a - b)
+                    .collect();
+                let difference_points: PlotPoints = difference_signal
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &y)| [i as f64, y as f64])
+                    .collect();
+                let difference_line = Line::new(difference_points).name("Difference");
 
                 // Plot the lines
                 Plot::new("time_domain_plot")
                     .legend(egui_plot::Legend::default())
                     .show(ui, |plot_ui| {
-                        plot_ui.line(input_line);
-                        plot_ui.line(expected_line);
+                        // plot_ui.line(input_line);
+                        // plot_ui.line(expected_line);
+                        plot_ui.line(difference_line);
                     });
             } else {
                 ui.label("No time-domain data to display yet.");
