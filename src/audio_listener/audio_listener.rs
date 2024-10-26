@@ -28,13 +28,14 @@ impl SimilarityMetric {
     }
 }
 
-/// Computes DTW-based similarity between two chroma feature sequences using the `distances` crate.
+/// Computes DTW-based similarity between two chroma feature sequences using the `augurs_dtw` crate.
 /// This function assumes that both `a` and `b` are sequences of chroma vectors (Vec<f32>).
 fn compute_dtw_similarity(a: &[Vec<f32>], b: &[Vec<f32>]) -> f32 {
     // Ensure both sequences are non-empty
     if a.is_empty() || b.is_empty() {
         return 0.0;
     }
+
     let a_flat: Vec<f32> = a.iter().flat_map(|v| v.iter().cloned()).collect();
     let b_flat: Vec<f32> = b.iter().flat_map(|v| v.iter().cloned()).collect();
 
@@ -164,12 +165,6 @@ impl AudioListener {
         }
     }
 
-    /// Sets a new similarity metric at runtime.
-    pub fn set_similarity_metric(&self, new_metric: SimilarityMetric) {
-        let mut metric = self.similarity_metric.lock().unwrap();
-        *metric = new_metric;
-    }
-
     /// Sets a new decay parameter for all active expected notes.
     pub fn set_decay(&self, new_decay: f32) {
         let mut active_notes = self.expected_active_notes.lock().unwrap();
@@ -234,8 +229,6 @@ impl AudioListener {
     }
 }
 
-/// Processes incoming audio data, extracts chroma features, compares with expected notes,
-/// and sends the similarity score.
 fn process_audio_input(
     data: &[f32],
     sample_rate: f32,
@@ -269,6 +262,9 @@ fn process_audio_input(
 
         // Extract the current frame
         let input_signal = buffer[..FRAME_SIZE].to_vec();
+        // Normalize the input_signal
+        let normalized_input_signal = normalize_signal(&input_signal);
+
         // Remove the processed samples, keeping the overlap
         buffer.drain(..HOP_SIZE);
         drop(buffer); // Release the lock
@@ -290,6 +286,9 @@ fn process_audio_input(
             &expected_active_notes,
         );
         if let Some(expected_signal) = expected_signal {
+            // Normalize the expected_signal
+            let normalized_expected_signal = normalize_signal(&expected_signal);
+
             println!(
                 "Raw MIC: {}, Raw notes: {}",
                 input_signal.len(),
@@ -297,8 +296,8 @@ fn process_audio_input(
             );
 
             // Extract chroma features
-            let input_chroma = compute_chroma_features(&input_signal, sample_rate);
-            let expected_chroma = compute_chroma_features(&expected_signal, sample_rate);
+            let input_chroma = compute_chroma_features(&normalized_input_signal, sample_rate);
+            let expected_chroma = compute_chroma_features(&normalized_expected_signal, sample_rate);
 
             // Store chroma features in Mutex Vecs sent to GUI
             {
@@ -321,8 +320,8 @@ fn process_audio_input(
                 let mut input_signal_hist = input_signal_history.lock().unwrap();
                 let mut expected_signal_hist = expected_signal_history.lock().unwrap();
 
-                input_signal_hist.push(input_signal.clone());
-                expected_signal_hist.push(expected_signal.clone());
+                input_signal_hist.push(normalized_input_signal.clone());
+                expected_signal_hist.push(normalized_expected_signal.clone());
 
                 // Limit history size
                 const MAX_SIGNAL_HISTORY: usize = 100;
@@ -339,7 +338,7 @@ fn process_audio_input(
                 (*metric_lock, *computed_lock)
             };
 
-            if !computed {
+            if computed {
                 // Similarity already computed for the current set of notes
                 continue;
             }
@@ -426,5 +425,21 @@ fn generate_expected_signal(
         Some(signal)
     } else {
         None
+    }
+}
+
+/// Normalizes a signal to the range [-1.0, 1.0]
+fn normalize_signal(signal: &[f32]) -> Vec<f32> {
+    let max_val = signal.iter().cloned().fold(f32::MIN, f32::max);
+    let min_val = signal.iter().cloned().fold(f32::MAX, f32::min);
+    let range = max_val - min_val;
+
+    if range == 0.0 {
+        vec![0.0; signal.len()]
+    } else {
+        signal
+            .iter()
+            .map(|&x| (x - min_val) / range * 2.0 - 1.0)
+            .collect()
     }
 }

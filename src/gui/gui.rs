@@ -206,20 +206,20 @@ impl eframe::App for TabApp {
 
             ui.horizontal(|ui| {
                 ui.label("Decay:");
-                ui.add(egui::Slider::new(&mut self.configs.decay, 0.9..=1.0));
+                ui.add(egui::Slider::new(&mut self.configs.decay, 0.9..=1.0).step_by(0.001));
             });
 
             ui.horizontal(|ui| {
                 ui.label("Volume:");
-                ui.add(egui::Slider::new(&mut self.configs.volume, 0.0..=1.0));
+                ui.add(egui::Slider::new(&mut self.configs.volume, 0.0..=1.0).step_by(0.01));
             });
 
             ui.horizontal(|ui| {
                 ui.label("Matching Threshold:");
-                ui.add(egui::Slider::new(
-                    &mut self.configs.matching_threshold,
-                    0.0..=1.0,
-                ));
+                ui.add(
+                    egui::Slider::new(&mut self.configs.matching_threshold, 0.0..=1.0)
+                        .step_by(0.01),
+                );
             });
 
             ui.separator();
@@ -433,10 +433,15 @@ impl eframe::App for TabApp {
         // Update the AudioListener's decay based on the GUI setting
         {
             let decay = self.configs.decay;
-            // Assuming you add a method to AudioListener to update decay
-            // e.g., self.audio_listener.set_decay(decay);
-            // Implement this method in AudioListener
             self.audio_listener.set_decay(decay);
+        }
+
+        // Update the AudioPlayer's decay and volume based on the GUI settings
+        {
+            let decay = self.configs.decay;
+            let volume = self.configs.volume;
+            self.audio_player.set_decay(decay);
+            self.audio_player.set_volume(volume);
         }
 
         // Update the matching threshold in the listener

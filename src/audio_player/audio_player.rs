@@ -1,3 +1,5 @@
+// audio_player.rs
+
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream};
 use rand::random;
@@ -90,10 +92,7 @@ impl AudioPlayer {
 
     pub fn play_notes_with_config(&self, notes: &[Note], decay: f32, volume: f32) {
         // Update volume
-        {
-            let mut vol = self.volume.lock().unwrap();
-            *vol = volume;
-        }
+        self.set_volume(volume);
 
         let mut active_notes = self.active_notes.lock().unwrap();
         for note in notes {
@@ -105,8 +104,23 @@ impl AudioPlayer {
             }
         }
     }
+
+    /// Sets a new decay parameter for all active notes.
+    pub fn set_decay(&self, new_decay: f32) {
+        let mut active_notes = self.active_notes.lock().unwrap();
+        for ks in active_notes.iter_mut() {
+            ks.decay = new_decay;
+        }
+    }
+
+    /// Sets a new volume parameter.
+    pub fn set_volume(&self, new_volume: f32) {
+        let mut vol = self.volume.lock().unwrap();
+        *vol = new_volume;
+    }
 }
 
+/// Make KarplusStrong public
 pub struct KarplusStrong {
     pub buffer: Vec<f32>,
     pub position: usize,
