@@ -18,11 +18,22 @@ pub enum SimilarityMetric {
     // Future metrics can be added here
 }
 
+enum DistanceMetric {
+    Euclidean,
+    Manhattan,
+}
+
 impl SimilarityMetric {
     /// Computes the similarity between two feature sequences based on the selected metric.
-    fn compute_similarity(&self, a: &[Vec<f32>], b: &[Vec<f32>], sample_rate: f32) -> f32 {
+    fn compute_similarity(
+        &self,
+        a: &[Vec<f32>],
+        b: &[Vec<f32>],
+        distance_metric: DistanceMetric,
+        sample_rate: f32,
+    ) -> f32 {
         match self {
-            SimilarityMetric::DTW => compute_dtw_similarity(a, b),
+            SimilarityMetric::DTW => compute_dtw_similarity(a, b, &distance_metric),
             // Add more metrics here as needed
         }
     }
@@ -30,7 +41,7 @@ impl SimilarityMetric {
 
 /// Computes DTW-based similarity between two chroma feature sequences using the `augurs_dtw` crate.
 /// This function assumes that both `a` and `b` are sequences of chroma vectors (Vec<f32>).
-fn compute_dtw_similarity(a: &[Vec<f32>], b: &[Vec<f32>]) -> f32 {
+fn compute_dtw_similarity(a: &[Vec<f32>], b: &[Vec<f32>], distance_metric: &DistanceMetric) -> f32 {
     // Ensure both sequences are non-empty
     if a.is_empty() || b.is_empty() {
         return 0.0;
@@ -41,8 +52,11 @@ fn compute_dtw_similarity(a: &[Vec<f32>], b: &[Vec<f32>]) -> f32 {
 
     let a_flat_f64: Vec<f64> = a_flat.iter().map(|&x| x as f64).collect();
     let b_flat_f64: Vec<f64> = b_flat.iter().map(|&x| x as f64).collect();
-
-    let distance = Dtw::euclidean().distance(&a_flat_f64, &b_flat_f64);
+    let distance = match distance_metric {
+        DistanceMetric::Euclidean => Dtw::euclidean().distance(&a_flat_f64, &b_flat_f64),
+        DistanceMetric::Manhattan => Dtw::manhattan().distance(&a_flat_f64, &b_flat_f64),
+    };
+    // let distance = Dtw::euclidean().distance(&a_flat_f64, &b_flat_f64);
 
     // Convert distance to similarity score (higher is better)
     // You may adjust the scaling based on observed distance ranges
@@ -52,6 +66,7 @@ fn compute_dtw_similarity(a: &[Vec<f32>], b: &[Vec<f32>]) -> f32 {
         1.0 / distance as f32
     }
 }
+//  ÄR DENNA SKALNING RÄTT?
 
 /// Computes chroma features for a given audio frame.
 fn compute_chroma_features(signal: &[f32], sample_rate: f32) -> Vec<f32> {
@@ -150,7 +165,7 @@ impl AudioListener {
         let expected_active_notes = Arc::new(Mutex::new(Vec::new()));
 
         Self {
-            stream: None, // We'll set this in the start method
+            stream: None,
             match_result_sender: Arc::new(match_result_sender),
             expected_notes,
             sample_rate,
@@ -159,7 +174,7 @@ impl AudioListener {
             expected_chroma_history,
             input_signal_history,
             expected_signal_history,
-            similarity_metric, // Initialize similarity metric
+            similarity_metric,
             similarity_computed,
             expected_active_notes,
         }
@@ -198,7 +213,6 @@ impl AudioListener {
                 .build_input_stream(
                     &config.into(),
                     move |data: &[f32], _| {
-                        // Call the processing function with new parameters
                         process_audio_input(
                             data,
                             sample_rate,
@@ -211,7 +225,7 @@ impl AudioListener {
                             &expected_signal_history,
                             &similarity_metric,
                             &similarity_computed,
-                            &expected_active_notes, // Pass expected_active_notes
+                            &expected_active_notes,
                         );
                     },
                     |err| eprintln!("Stream error: {}", err),
@@ -239,9 +253,9 @@ fn process_audio_input(
     expected_chroma_history: &Arc<Mutex<Vec<Vec<f32>>>>,
     input_signal_history: &Arc<Mutex<Vec<Vec<f32>>>>,
     expected_signal_history: &Arc<Mutex<Vec<Vec<f32>>>>,
-    similarity_metric: &Arc<Mutex<SimilarityMetric>>, // New parameter
-    similarity_computed: &Arc<Mutex<bool>>,           // New parameter
-    expected_active_notes: &Arc<Mutex<Vec<KarplusStrong>>>, // New parameter
+    similarity_metric: &Arc<Mutex<SimilarityMetric>>,
+    similarity_computed: &Arc<Mutex<bool>>,
+    expected_active_notes: &Arc<Mutex<Vec<KarplusStrong>>>,
 ) {
     // Append incoming data to the input buffer
     {
@@ -250,8 +264,8 @@ fn process_audio_input(
     }
 
     // Define frame and hop sizes
-    const FRAME_SIZE: usize = 2048; // Adjusted for better performance
-    const HOP_SIZE: usize = 512; // Overlap of FRAME_SIZE - HOP_SIZE
+    const FRAME_SIZE: usize = 2048 * 2; // Adjusted for better performance
+    const HOP_SIZE: usize = 512 * 2; // Overlap of FRAME_SIZE - HOP_SIZE
 
     loop {
         let mut buffer = input_buffer.lock().unwrap();
@@ -363,6 +377,7 @@ fn process_audio_input(
             let similarity = metric.compute_similarity(
                 &input_chroma_sequence,
                 &expected_chroma_sequence,
+                DistanceMetric::Euclidean,
                 sample_rate,
             );
 

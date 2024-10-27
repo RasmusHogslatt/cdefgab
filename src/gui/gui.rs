@@ -17,7 +17,7 @@ use crate::{
     time_scrubber::time_scrubber::TimeScrubber,
 };
 use eframe::egui;
-use egui::ScrollArea;
+use egui::{ScrollArea, Vec2};
 use renderer::{render_score, score_info};
 
 // Import the plot module from egui_plot
@@ -368,9 +368,9 @@ impl eframe::App for TabApp {
                 Plot::new("time_domain_plot")
                     .legend(egui_plot::Legend::default())
                     .show(ui, |plot_ui| {
-                        // plot_ui.line(input_line);
-                        // plot_ui.line(expected_line);
-                        plot_ui.line(difference_line);
+                        plot_ui.line(input_line);
+                        plot_ui.line(expected_line);
+                        // plot_ui.line(difference_line);
                     });
             } else {
                 ui.label("No time-domain data to display yet.");
