@@ -113,7 +113,7 @@ impl TabApp {
         let expected_chroma_history = audio_listener.expected_chroma_history.clone();
         let input_signal_history = audio_listener.input_signal_history.clone();
         let expected_signal_history = audio_listener.expected_signal_history.clone();
-
+        let max_amplitude = audio_listener.max_amplitude.clone();
         Self {
             score: Some(score),
             tab_text: Some(tab_text),
@@ -323,13 +323,13 @@ impl eframe::App for TabApp {
             }
         });
 
-        // Window for Time-Domain Signal Plot
         egui::Window::new("Time-Domain Plot").show(ctx, |ui| {
             ui.heading("Live Time-Domain Signal Plot");
 
-            // Access the raw signal histories
+            // Access the raw signal histories and max_amplitude
             let input_signal_hist = self.input_signal_history.lock().unwrap();
             let expected_signal_hist = self.expected_signal_history.lock().unwrap();
+            let max_amplitude = *self.audio_listener.max_amplitude.lock().unwrap();
 
             if !input_signal_hist.is_empty() && !expected_signal_hist.is_empty() {
                 // Use the latest raw signals
@@ -352,8 +352,10 @@ impl eframe::App for TabApp {
                 // Create lines
                 let input_line = Line::new(input_points).name("Input Signal");
                 let expected_line = Line::new(expected_points).name("Expected Signal");
+
+                // Optionally, plot the difference
                 let difference_signal: Vec<f32> = input_signal
-                    .into_iter()
+                    .iter()
                     .zip(expected_signal)
                     .map(|(a, b)| a - b)
                     .collect();
@@ -364,12 +366,16 @@ impl eframe::App for TabApp {
                     .collect();
                 let difference_line = Line::new(difference_points).name("Difference");
 
-                // Plot the lines
+                // Plot the lines with fixed y-axis limits
                 Plot::new("time_domain_plot")
                     .legend(egui_plot::Legend::default())
+                    .view_aspect(2.0) // Adjust aspect ratio as needed
+                    .include_y(-max_amplitude as f64 * 1.1) // Slight padding
+                    .include_y(max_amplitude as f64 * 1.1)
                     .show(ui, |plot_ui| {
                         plot_ui.line(input_line);
                         plot_ui.line(expected_line);
+                        // Uncomment to display the difference
                         // plot_ui.line(difference_line);
                     });
             } else {
@@ -432,10 +438,6 @@ impl eframe::App for TabApp {
             if self.current_notes.is_some() && self.is_playing {
                 self.similarity = similarity;
                 self.is_match = self.similarity >= self.configs.matching_threshold;
-                println!(
-                    "Similarity: {:.3}, Match: {}",
-                    self.similarity, self.is_match
-                );
             } else {
                 self.similarity = 0.0;
                 self.is_match = false;

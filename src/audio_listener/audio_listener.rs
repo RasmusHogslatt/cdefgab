@@ -58,12 +58,11 @@ fn compute_dtw_similarity(a: &[Vec<f32>], b: &[Vec<f32>], distance_metric: &Dist
     };
     // let distance = Dtw::euclidean().distance(&a_flat_f64, &b_flat_f64);
 
-    // Convert distance to similarity score (higher is better)
-    // You may adjust the scaling based on observed distance ranges
+    // Inverse scaling
     if distance == 0.0 {
         1.0
     } else {
-        1.0 / distance as f32
+        1.0 / (1.0 + distance as f32)
     }
 }
 //  ÄR DENNA SKALNING RÄTT?
@@ -122,18 +121,15 @@ pub struct AudioListener {
     expected_notes: Arc<Mutex<Option<Vec<Note>>>>,
     pub sample_rate: f32,
     input_buffer: Arc<Mutex<Vec<f32>>>,
-    // Fields for storing chroma feature histories
     pub input_chroma_history: Arc<Mutex<Vec<Vec<f32>>>>,
     pub expected_chroma_history: Arc<Mutex<Vec<Vec<f32>>>>,
-    // Fields for storing raw signal histories
     pub input_signal_history: Arc<Mutex<Vec<Vec<f32>>>>,
     pub expected_signal_history: Arc<Mutex<Vec<Vec<f32>>>>,
-    pub similarity_metric: Arc<Mutex<SimilarityMetric>>, // Current similarity metric
-    // Flag to ensure similarity is computed only once per set of notes
+    pub similarity_metric: Arc<Mutex<SimilarityMetric>>,
     pub similarity_computed: Arc<Mutex<bool>>,
     pub expected_active_notes: Arc<Mutex<Vec<KarplusStrong>>>,
+    pub max_amplitude: Arc<Mutex<f32>>, // Isolated field
 }
-
 impl AudioListener {
     pub fn new(
         match_result_sender: Sender<f32>,
@@ -177,9 +173,17 @@ impl AudioListener {
             similarity_metric,
             similarity_computed,
             expected_active_notes,
+            max_amplitude: Arc::new(Mutex::new(1.0)),
         }
     }
 
+    fn update_max_amplitude(&self, expected_signal: &[f32]) {
+        let current_max = expected_signal.iter().cloned().fold(0.0, f32::max);
+        let mut max_amp_lock = self.max_amplitude.lock().unwrap();
+        if current_max > *max_amp_lock {
+            *max_amp_lock = current_max;
+        }
+    }
     /// Sets a new decay parameter for all active expected notes.
     pub fn set_decay(&self, new_decay: f32) {
         let mut active_notes = self.expected_active_notes.lock().unwrap();
@@ -187,6 +191,7 @@ impl AudioListener {
             ks.decay = new_decay;
         }
     }
+    // audio_listener.rs
 
     pub fn start(&mut self) {
         let host = cpal::default_host();
@@ -207,6 +212,7 @@ impl AudioListener {
         let similarity_metric = Arc::clone(&self.similarity_metric);
         let similarity_computed = Arc::clone(&self.similarity_computed);
         let expected_active_notes = Arc::clone(&self.expected_active_notes);
+        let max_amplitude = Arc::clone(&self.max_amplitude); // Clone the max_amplitude
 
         let stream = match config.sample_format() {
             SampleFormat::F32 => device
@@ -226,6 +232,7 @@ impl AudioListener {
                             &similarity_metric,
                             &similarity_computed,
                             &expected_active_notes,
+                            max_amplitude.clone(), // Pass the cloned Arc<Mutex<f32>>
                         );
                     },
                     |err| eprintln!("Stream error: {}", err),
@@ -256,6 +263,7 @@ fn process_audio_input(
     similarity_metric: &Arc<Mutex<SimilarityMetric>>,
     similarity_computed: &Arc<Mutex<bool>>,
     expected_active_notes: &Arc<Mutex<Vec<KarplusStrong>>>,
+    max_amplitude: Arc<Mutex<f32>>, // Changed parameter
 ) {
     // Append incoming data to the input buffer
     {
@@ -276,8 +284,6 @@ fn process_audio_input(
 
         // Extract the current frame
         let input_signal = buffer[..FRAME_SIZE].to_vec();
-        // Normalize the input_signal
-        let normalized_input_signal = normalize_signal(&input_signal);
 
         // Remove the processed samples, keeping the overlap
         buffer.drain(..HOP_SIZE);
@@ -298,16 +304,15 @@ fn process_audio_input(
             sample_rate,
             FRAME_SIZE,
             &expected_active_notes,
+            &max_amplitude, // Pass the max_amplitude Arc<Mutex<f32>>
         );
         if let Some(expected_signal) = expected_signal {
-            // Normalize the expected_signal
-            let normalized_expected_signal = normalize_signal(&expected_signal);
+            // Retrieve the fixed maximum amplitude
+            let max_amp = *max_amplitude.lock().unwrap();
 
-            println!(
-                "Raw MIC: {}, Raw notes: {}",
-                input_signal.len(),
-                expected_signal.len()
-            );
+            // Normalize using the fixed maximum amplitude
+            let normalized_input_signal = normalize_signal(&input_signal, max_amp);
+            let normalized_expected_signal = normalize_signal(&expected_signal, max_amp);
 
             // Extract chroma features
             let input_chroma = compute_chroma_features(&normalized_input_signal, sample_rate);
@@ -396,12 +401,12 @@ fn process_audio_input(
     }
 }
 
-/// Generates the expected signal using the Karplus-Strong algorithm to match the audio_player's signal.
 fn generate_expected_signal(
     expected_notes: &Option<Vec<Note>>,
     sample_rate: f32,
     num_samples: usize,
     expected_active_notes: &Arc<Mutex<Vec<KarplusStrong>>>,
+    max_amplitude: &Arc<Mutex<f32>>, // Changed parameter
 ) -> Option<Vec<f32>> {
     if let Some(notes) = expected_notes {
         let mut signal = vec![0.0; num_samples];
@@ -437,24 +442,25 @@ fn generate_expected_signal(
             signal[i] = sample;
         }
 
+        // Update the maximum amplitude based on the generated signal
+        // Note: Since we're now handling max_amplitude outside, ensure to update it accordingly
+        let mut max_amp_lock = max_amplitude.lock().unwrap();
+        let current_max = signal.iter().cloned().fold(0.0, f32::max);
+        if current_max > *max_amp_lock {
+            *max_amp_lock = current_max;
+        }
+
         Some(signal)
     } else {
         None
     }
 }
 
-/// Normalizes a signal to the range [-1.0, 1.0]
-fn normalize_signal(signal: &[f32]) -> Vec<f32> {
-    let max_val = signal.iter().cloned().fold(f32::MIN, f32::max);
-    let min_val = signal.iter().cloned().fold(f32::MAX, f32::min);
-    let range = max_val - min_val;
-
-    if range == 0.0 {
+/// Normalizes a signal to the range [-1.0, 1.0] based on a fixed maximum amplitude.
+fn normalize_signal(signal: &[f32], max_amplitude: f32) -> Vec<f32> {
+    if max_amplitude == 0.0 {
         vec![0.0; signal.len()]
     } else {
-        signal
-            .iter()
-            .map(|&x| (x - min_val) / range * 2.0 - 1.0)
-            .collect()
+        signal.iter().map(|&x| x / max_amplitude).collect()
     }
 }
