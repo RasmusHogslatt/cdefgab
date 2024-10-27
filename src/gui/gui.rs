@@ -10,7 +10,7 @@ use std::{
 };
 
 use crate::{
-    audio_listener::audio_listener::{AudioListener, SimilarityMetric},
+    audio_listener::audio_listener::AudioListener,
     audio_player::audio_player::AudioPlayer,
     music_representation::musical_structures::{Note, Score},
     renderer::*,
@@ -31,7 +31,6 @@ pub struct Configs {
     pub dashes_per_division: usize,
     pub decay: f32,
     pub volume: f32,
-    pub matching_threshold: f32,
 }
 
 pub struct DisplayMetrics {
@@ -48,7 +47,6 @@ impl Configs {
             dashes_per_division: 4,
             decay: 0.996,
             volume: 0.5,
-            matching_threshold: 0.8, // Set default threshold to 0.8
         }
     }
 }
@@ -66,16 +64,13 @@ pub struct TabApp {
     pub current_notes: Option<Vec<Note>>,
     pub audio_player: AudioPlayer,
     pub audio_listener: AudioListener,
-    pub match_result_receiver: Receiver<f32>,
+    pub match_result_receiver: Receiver<bool>, // Updated type
     pub expected_notes: Arc<Mutex<Option<Vec<Note>>>>,
-    pub similarity: f32,
     pub is_match: bool,
-    pub matching_threshold: Arc<Mutex<f32>>,
     // New fields for accessing chroma and signal feature histories
     pub input_chroma_history: Arc<Mutex<Vec<Vec<f32>>>>,
     pub expected_chroma_history: Arc<Mutex<Vec<Vec<f32>>>>,
     pub input_signal_history: Arc<Mutex<Vec<Vec<f32>>>>,
-    pub expected_signal_history: Arc<Mutex<Vec<Vec<f32>>>>,
 }
 
 impl TabApp {
@@ -100,20 +95,16 @@ impl TabApp {
 
         let (match_result_sender, match_result_receiver) = mpsc::channel();
         let expected_notes = Arc::new(Mutex::new(None));
-        let matching_threshold = Arc::new(Mutex::new(configs.matching_threshold));
-        let mut audio_listener = AudioListener::new(
-            match_result_sender.clone(),
-            expected_notes.clone(),
-            SimilarityMetric::DTW, // Use DTW metric
-        );
+
+        let mut audio_listener =
+            AudioListener::new(match_result_sender.clone(), expected_notes.clone());
         audio_listener.start();
 
         // Clone the chroma and signal feature histories before moving audio_listener
         let input_chroma_history = audio_listener.input_chroma_history.clone();
         let expected_chroma_history = audio_listener.expected_chroma_history.clone();
         let input_signal_history = audio_listener.input_signal_history.clone();
-        let expected_signal_history = audio_listener.expected_signal_history.clone();
-        let max_amplitude = audio_listener.max_amplitude.clone();
+
         Self {
             score: Some(score),
             tab_text: Some(tab_text),
@@ -129,14 +120,11 @@ impl TabApp {
             audio_listener,
             match_result_receiver,
             expected_notes,
-            similarity: 0.0,
             is_match: false,
-            matching_threshold,
             // Initialize new fields
             input_chroma_history,
             expected_chroma_history,
             input_signal_history,
-            expected_signal_history,
         }
     }
 
@@ -175,7 +163,6 @@ impl TabApp {
             self.is_playing = false;
             self.current_notes = None;
             self.previous_notes = None;
-            self.similarity = 0.0;
             self.is_match = false;
         }
     }
@@ -212,14 +199,6 @@ impl eframe::App for TabApp {
             ui.horizontal(|ui| {
                 ui.label("Volume:");
                 ui.add(egui::Slider::new(&mut self.configs.volume, 0.0..=1.0).step_by(0.01));
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("Matching Threshold:");
-                ui.add(
-                    egui::Slider::new(&mut self.configs.matching_threshold, 0.0..=1.0)
-                        .step_by(0.01),
-                );
             });
 
             ui.separator();
@@ -274,9 +253,8 @@ impl eframe::App for TabApp {
 
             ui.separator();
 
-            // Display similarity and match status only if a similarity score has been received
+            // Display match status
             if self.is_playing && self.current_notes.is_some() {
-                ui.label(format!("Similarity: {:.3}", self.similarity));
                 ui.label(format!("Note Matched: {}", self.is_match));
             }
         });
@@ -326,15 +304,12 @@ impl eframe::App for TabApp {
         egui::Window::new("Time-Domain Plot").show(ctx, |ui| {
             ui.heading("Live Time-Domain Signal Plot");
 
-            // Access the raw signal histories and max_amplitude
+            // Access the raw signal histories
             let input_signal_hist = self.input_signal_history.lock().unwrap();
-            let expected_signal_hist = self.expected_signal_history.lock().unwrap();
-            let max_amplitude = *self.audio_listener.max_amplitude.lock().unwrap();
 
-            if !input_signal_hist.is_empty() && !expected_signal_hist.is_empty() {
+            if !input_signal_hist.is_empty() {
                 // Use the latest raw signals
                 let input_signal = &input_signal_hist[input_signal_hist.len() - 1];
-                let expected_signal = &expected_signal_hist[expected_signal_hist.len() - 1];
 
                 // Create plot points for raw signals
                 let input_points: PlotPoints = input_signal
@@ -343,40 +318,17 @@ impl eframe::App for TabApp {
                     .map(|(i, &y)| [i as f64, y as f64])
                     .collect();
 
-                let expected_points: PlotPoints = expected_signal
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &y)| [i as f64, y as f64])
-                    .collect();
-
                 // Create lines
                 let input_line = Line::new(input_points).name("Input Signal");
-                let expected_line = Line::new(expected_points).name("Expected Signal");
-
-                // Optionally, plot the difference
-                let difference_signal: Vec<f32> = input_signal
-                    .iter()
-                    .zip(expected_signal)
-                    .map(|(a, b)| a - b)
-                    .collect();
-                let difference_points: PlotPoints = difference_signal
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &y)| [i as f64, y as f64])
-                    .collect();
-                let difference_line = Line::new(difference_points).name("Difference");
 
                 // Plot the lines with fixed y-axis limits
                 Plot::new("time_domain_plot")
                     .legend(egui_plot::Legend::default())
                     .view_aspect(2.0) // Adjust aspect ratio as needed
-                    .include_y(-max_amplitude as f64 * 1.1) // Slight padding
-                    .include_y(max_amplitude as f64 * 1.1)
+                    .include_y(-1.1) // Since we normalized per frame
+                    .include_y(1.1)
                     .show(ui, |plot_ui| {
                         plot_ui.line(input_line);
-                        plot_ui.line(expected_line);
-                        // Uncomment to display the difference
-                        // plot_ui.line(difference_line);
                     });
             } else {
                 ui.label("No time-domain data to display yet.");
@@ -415,12 +367,6 @@ impl eframe::App for TabApp {
                     let mut expected_notes = self.expected_notes.lock().unwrap();
                     *expected_notes = Some(notes.clone());
 
-                    // Reset similarity computation flag
-                    {
-                        let mut computed = self.audio_listener.similarity_computed.lock().unwrap();
-                        *computed = false;
-                    }
-
                     // Play the notes
                     self.audio_player.play_notes_with_config(
                         &notes,
@@ -433,21 +379,13 @@ impl eframe::App for TabApp {
             ctx.request_repaint();
         }
 
-        // Receive similarity result from AudioListener
-        while let Ok(similarity) = self.match_result_receiver.try_recv() {
+        // Receive match result from AudioListener
+        while let Ok(is_match) = self.match_result_receiver.try_recv() {
             if self.current_notes.is_some() && self.is_playing {
-                self.similarity = similarity;
-                self.is_match = self.similarity >= self.configs.matching_threshold;
+                self.is_match = is_match;
             } else {
-                self.similarity = 0.0;
                 self.is_match = false;
             }
-        }
-
-        // Update the AudioListener's decay based on the GUI setting
-        {
-            let decay = self.configs.decay;
-            self.audio_listener.set_decay(decay);
         }
 
         // Update the AudioPlayer's decay and volume based on the GUI settings
@@ -458,18 +396,11 @@ impl eframe::App for TabApp {
             self.audio_player.set_volume(volume);
         }
 
-        // Update the matching threshold in the listener
-        {
-            let mut threshold = self.matching_threshold.lock().unwrap();
-            *threshold = self.configs.matching_threshold;
-        }
-
         // Check if playback has finished
         if self.is_playing && self.stop_flag.load(Ordering::Relaxed) {
             self.is_playing = false;
             self.current_notes = None;
             self.previous_notes = None;
-            self.similarity = 0.0;
             self.is_match = false;
         }
     }
