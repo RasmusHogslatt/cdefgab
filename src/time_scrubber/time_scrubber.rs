@@ -24,7 +24,6 @@ impl TimeScrubber {
             score.measures.len() as f32 * seconds_per_division * score.divisions_per_measure as f32,
         );
 
-        println!("Total duration: {} seconds", total_duration.as_secs_f32());
         Self {
             start_time: None,
             total_duration: Some(total_duration),

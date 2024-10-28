@@ -1,1 +1,8 @@
-I will provide you with a musical program that parses musicxml and renders guitar tablature. It also simulates playback with audio in realtime and listens to the microphone to see if I am playing my guitar correctly.
+I will provide you with a musical program that parses musicxml and renders guitar tablature. It also simulates playback with audio in realtime and listens to the microphone to see if I am playing my guitar correctly.'
+
+
+I will provide you with a musical program that parses musicxml and renders guitar tablature. It also simulates playback with audio in realtime and listens to the microphone to see if I am playing my guitar correctly. The audio_player.rs file contains functionality to play back the expected synthetic guitar sound and allows the gui to be used to tune parameters. I want you to add more relevant parameters to the logic in audio_player.rs and gui.rs for the playback, so that different types of guitars can be simulated. Also, I want you to add different "Guitar profiles", where one of them is "Custom" which allows the user to modify the parameters in the gui. The other profiles should be pretuned and selectable in the gui. So you should be able to choose between "Custom", "Acoustic guitar", "Electric guitar" etc. 
+
+Do not introduce new crates and only modify audio_player.rs and gui.rs, but study the other files for context. Provide the full implementation of the modified files.
+
+Here is the code:
