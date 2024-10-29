@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     audio_listener::audio_listener::AudioListener,
-    audio_player::audio_player::AudioPlayer,
+    audio_player::audio_player::{AudioPlayer, GuitarConfig},
     music_representation::musical_structures::{Note, Score},
     renderer::*,
     time_scrubber::time_scrubber::TimeScrubber,
@@ -28,6 +28,7 @@ pub struct Configs {
     pub dashes_per_division: usize,
     pub decay: f32,
     pub volume: f32,
+    pub custom_guitar_config: GuitarConfig,
 }
 
 pub struct DisplayMetrics {
@@ -44,6 +45,13 @@ impl Configs {
             dashes_per_division: 4,
             decay: 0.996,
             volume: 0.5,
+            custom_guitar_config: GuitarConfig {
+                decay: 0.96,
+                string_damping: 0.5,
+                body_resonance: 100.0,
+                body_damping: 0.5,
+                pickup_position: 0.85,
+            },
         }
     }
 }

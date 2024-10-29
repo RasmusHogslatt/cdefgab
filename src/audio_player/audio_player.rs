@@ -3,6 +3,7 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream};
 use rand::random;
+use std::f32::consts::PI;
 use std::sync::{Arc, Mutex};
 
 use crate::gui::gui::Configs;
@@ -11,9 +12,10 @@ use crate::music_representation::musical_structures::{calculate_frequency, Note}
 pub struct AudioPlayer {
     stream: Stream,
     active_notes: Arc<Mutex<Vec<KarplusStrong>>>,
-    sample_rate: f32,
+    pub sample_rate: f32,
     volume: Arc<Mutex<f32>>,
     pub seconds_per_division: f32,
+    pub config: Arc<Mutex<Configs>>,
 }
 
 impl AudioPlayer {
@@ -65,10 +67,12 @@ impl AudioPlayer {
     }
 
     fn write_data(
+        &self,
         output: &mut [f32],
         channels: usize,
         active_notes: &Arc<Mutex<Vec<KarplusStrong>>>,
         volume: &Arc<Mutex<f32>>,
+        guitar_config: &GuitarConfig,
     ) {
         let mut active_notes = active_notes.lock().unwrap();
         let volume = *volume.lock().unwrap();
@@ -78,7 +82,7 @@ impl AudioPlayer {
 
             // Sum samples from all active notes
             active_notes.retain_mut(|note| {
-                if let Some(sample) = note.next_sample() {
+                if let Some(sample) = note.next_sample(guitar_config, self.sample_rate) {
                     value += sample;
                     true
                 } else {
@@ -116,7 +120,7 @@ impl AudioPlayer {
                 frequency,
                 seconds_per_division * note.duration as f32,
                 self.sample_rate,
-                config.decay,
+                &config.custom_guitar_config,
             );
             active_notes.push(ks);
         }
@@ -137,7 +141,26 @@ impl AudioPlayer {
     }
 }
 
-/// Make KarplusStrong public
+pub struct GuitarConfig {
+    pub decay: f32,
+    pub string_damping: f32,
+    pub body_resonance: f32,
+    pub body_damping: f32,
+    pub pickup_position: f32,
+}
+
+impl GuitarConfig {
+    pub fn acoustic() -> Self {
+        GuitarConfig {
+            decay: 0.998,
+            string_damping: 0.2,
+            body_resonance: 100.0,
+            body_damping: 0.1,
+            pickup_position: 0.85,
+        }
+    }
+}
+
 pub struct KarplusStrong {
     pub buffer: Vec<f32>,
     pub position: usize,
@@ -146,12 +169,22 @@ pub struct KarplusStrong {
 }
 
 impl KarplusStrong {
-    pub fn new(frequency: f32, duration_seconds: f32, sample_rate: f32, decay: f32) -> Self {
+    pub fn new(
+        frequency: f32,
+        duration_seconds: f32,
+        sample_rate: f32,
+        config: &GuitarConfig,
+    ) -> Self {
         let buffer_length = (sample_rate / frequency).ceil() as usize;
         let mut buffer = Vec::with_capacity(buffer_length);
 
+        let mut prev = 0.0;
         for _ in 0..buffer_length {
-            buffer.push(random::<f32>() * 2.0 - 1.0);
+            let white = random::<f32>() * 2.0 - 1.0;
+            // Lowpass filter the white noise
+            let filtered = config.string_damping * prev + (1.0 - config.string_damping) * white;
+            buffer.push(filtered);
+            prev = filtered;
         }
 
         let remaining_samples = (duration_seconds * sample_rate) as usize;
@@ -159,11 +192,11 @@ impl KarplusStrong {
             buffer,
             position: 0,
             remaining_samples,
-            decay,
+            decay: config.decay,
         }
     }
 
-    pub fn next_sample(&mut self) -> Option<f32> {
+    pub fn next_sample(&mut self, config: &GuitarConfig, sample_rate: f32) -> Option<f32> {
         if self.remaining_samples == 0 {
             return None;
         }
@@ -172,12 +205,22 @@ impl KarplusStrong {
         let next_index = (self.position + 1) % self.buffer.len();
         let next_value = self.buffer[next_index];
 
-        let new_value = self.decay * 0.5 * (current_value + next_value);
+        let string_sample = self.decay
+            * (config.string_damping * current_value + (1.0 - config.string_damping) * next_value);
 
-        self.buffer[self.position] = new_value;
+        let body_freq = 2.0 * PI * config.body_resonance / sample_rate;
+
+        let resonated = string_sample * body_freq.sin();
+        let body_sample = resonated * (1.0 - config.body_damping);
+
+        // let new_value = self.decay * 0.5 * (current_value + next_value);
+
+        // self.buffer[self.position] = new_value;
+        self.buffer[self.position] = string_sample;
         self.position = next_index;
         self.remaining_samples -= 1;
 
-        Some(current_value)
+        // Some(current_value)
+        Some(string_sample * 0.7 + body_sample * 0.3)
     }
 }
