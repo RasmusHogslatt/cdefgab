@@ -5,6 +5,7 @@ use cpal::{SampleFormat, Stream};
 use rand::random;
 use std::sync::{Arc, Mutex};
 
+use crate::gui::gui::Configs;
 use crate::music_representation::musical_structures::{calculate_frequency, Note};
 
 pub struct AudioPlayer {
@@ -12,6 +13,7 @@ pub struct AudioPlayer {
     active_notes: Arc<Mutex<Vec<KarplusStrong>>>,
     sample_rate: f32,
     volume: Arc<Mutex<f32>>,
+    pub seconds_per_division: f32,
 }
 
 impl AudioPlayer {
@@ -43,17 +45,23 @@ impl AudioPlayer {
                 .unwrap(),
             _ => panic!("Unsupported sample format"),
         };
-
+        let seconds_per_division = 0.5;
         Self {
             stream,
             active_notes,
             sample_rate,
             volume,
+            seconds_per_division,
         }
     }
 
     pub fn start(&self) {
         self.stream.play().expect("Failed to start audio stream");
+    }
+
+    pub fn update_seconds_per_division(&mut self, tempo: f32, divisions_per_quarter: f32) {
+        let seconds_per_beat = 60.0 / tempo;
+        self.seconds_per_division = seconds_per_beat / divisions_per_quarter;
     }
 
     fn write_data(
@@ -90,18 +98,27 @@ impl AudioPlayer {
         }
     }
 
-    pub fn play_notes_with_config(&self, notes: &[Note], decay: f32, volume: f32) {
+    pub fn play_notes_with_config(
+        &self,
+        notes: &[Note],
+        config: &Configs,
+        volume: f32,
+        seconds_per_division: f32,
+    ) {
         // Update volume
         self.set_volume(volume);
 
         let mut active_notes = self.active_notes.lock().unwrap();
         for note in notes {
-            if let (Some(string), Some(fret)) = (note.string, note.fret) {
-                let frequency = calculate_frequency(string, fret);
-                let duration_seconds = 0.5;
-                let ks = KarplusStrong::new(frequency, duration_seconds, self.sample_rate, decay);
-                active_notes.push(ks);
-            }
+            let frequency = calculate_frequency(note);
+
+            let ks = KarplusStrong::new(
+                frequency,
+                seconds_per_division * note.duration as f32,
+                self.sample_rate,
+                config.decay,
+            );
+            active_notes.push(ks);
         }
     }
 

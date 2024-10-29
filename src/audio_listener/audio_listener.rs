@@ -209,8 +209,8 @@ fn generate_expected_chroma(expected_notes: &Option<Vec<Note>>) -> Vec<f32> {
     let mut chroma = vec![0.0; CHROMA_BINS];
     if let Some(notes) = expected_notes {
         for note in notes {
-            if let (Some(string), Some(fret)) = (note.string, note.fret) {
-                let frequency = calculate_frequency(string, fret);
+            if let (Some(_string), Some(_fret)) = (note.string, note.fret) {
+                let frequency = calculate_frequency(note);
                 let midi = freq_to_midi(frequency);
                 let pitch_class = (midi % 12) as usize;
                 chroma[pitch_class] += 1.0;

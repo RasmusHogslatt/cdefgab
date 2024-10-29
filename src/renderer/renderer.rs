@@ -63,7 +63,7 @@ pub fn render_measure(measure: &Measure, dashes_per_division: usize) -> Vec<Stri
 
     for (division_index, notes) in measure.positions.iter().enumerate() {
         let position_in_dashes = division_index * dashes_per_division;
-        for note in notes.values() {
+        for note in notes {
             if let (Some(string), Some(fret)) = (note.string, note.fret) {
                 insert_note_into_tab_line(
                     &mut tab_lines,

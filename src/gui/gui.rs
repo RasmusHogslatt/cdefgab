@@ -1,5 +1,3 @@
-// gui.rs
-
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -17,10 +15,9 @@ use crate::{
     time_scrubber::time_scrubber::TimeScrubber,
 };
 use eframe::egui;
-use egui::{ScrollArea, Vec2};
+use egui::ScrollArea;
 use renderer::{render_score, score_info};
 
-// Import the plot module from egui_plot
 use egui_plot::{Line, Plot, PlotPoints};
 
 pub struct Configs {
@@ -147,6 +144,7 @@ impl TabApp {
             };
             self.playback_handle = Some(thread::spawn(move || {
                 let mut scrubber = TimeScrubber::new(&score, tempo);
+
                 scrubber.simulate_playback(&score, tx, stop_flag);
             }));
 
@@ -356,7 +354,7 @@ impl eframe::App for TabApp {
         });
 
         // Receive notes from the playback thread without blocking
-        if let Some(receiver) = &self.notes_receiver {
+        if let (Some(receiver), Some(score)) = (&self.notes_receiver, &self.score) {
             while let Ok(notes) = receiver.try_recv() {
                 if !notes.is_empty() {
                     // Update previous and current notes
@@ -366,12 +364,27 @@ impl eframe::App for TabApp {
                     // Update expected notes for the AudioListener
                     let mut expected_notes = self.expected_notes.lock().unwrap();
                     *expected_notes = Some(notes.clone());
+                    match self.configs.use_custom_tempo {
+                        true => self.audio_player.update_seconds_per_division(
+                            self.configs.custom_tempo as f32,
+                            score.divisions_per_quarter as f32,
+                        ),
+                        false => self.audio_player.update_seconds_per_division(
+                            score.tempo as f32,
+                            score.divisions_per_quarter as f32,
+                        ),
+                    }
 
+                    println!(
+                        "Seconds per division: {}",
+                        self.audio_player.seconds_per_division
+                    );
                     // Play the notes
                     self.audio_player.play_notes_with_config(
                         &notes,
-                        self.configs.decay,
+                        &self.configs,
                         self.configs.volume,
+                        self.audio_player.seconds_per_division,
                     );
                 }
             }

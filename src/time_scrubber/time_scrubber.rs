@@ -108,7 +108,7 @@ impl TimeScrubber {
 
     pub fn send_notes(&self, measure: &Measure, current_division: usize, tx: &Sender<Vec<Note>>) {
         let notes_map = &measure.positions[current_division];
-        let notes: Vec<Note> = notes_map.values().cloned().collect();
+        let notes: Vec<Note> = notes_map.into_iter().cloned().collect();
 
         if tx.send(notes).is_err() {
             println!("Receiver has been dropped. Stopping playback.");

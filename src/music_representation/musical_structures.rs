@@ -1,18 +1,11 @@
 use core::fmt;
-use std::fs::File;
 use std::io::Read;
+use std::{collections::HashSet, fs::File};
 
 use roxmltree::{Document, Node};
 
 use regex::Regex;
 use std::collections::HashMap;
-
-// Define the NoteKey struct
-#[derive(Hash, Eq, PartialEq, Debug, Clone)]
-pub struct NoteKey {
-    pub string: u8,
-    pub fret: u8,
-}
 
 pub struct VoiceState {
     current_position: usize,
@@ -30,10 +23,12 @@ pub struct Score {
     pub divisions_per_measure: u8,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Note {
     pub string: Option<u8>, // The guitar string number (e.g., 1 to 6)
     pub fret: Option<u8>,   // The fret number for the note on the guitar
+    pub duration: u32,      // Duration in divisions
+    pub pitch: Option<Pitch>,
 }
 
 impl fmt::Display for Note {
@@ -47,7 +42,7 @@ impl fmt::Display for Note {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Pitch {
     pub step: char,        // Note step (A, B, C, D, E, F, G)
     pub alter: Option<i8>, // Sharps or flats (-1 for flat, +1 for sharp)
@@ -62,13 +57,13 @@ pub struct TimeSignature {
 
 #[derive(Clone, Default, Debug)]
 pub struct Measure {
-    pub positions: Vec<HashMap<NoteKey, Note>>, // Use HashMap to ensure unique notes per position
+    pub positions: Vec<HashSet<Note>>, // Use HashMap to ensure unique notes per position
 }
 
 impl Measure {
     pub fn new(total_divisions: usize) -> Self {
         Measure {
-            positions: vec![HashMap::new(); total_divisions], // Initialize with empty HashMaps for each division
+            positions: vec![HashSet::new(); total_divisions],
         }
     }
 }
@@ -207,13 +202,18 @@ pub fn parse_note(
         .children()
         .find(|n| n.has_tag_name("duration"))
         .and_then(|n| n.text().map(|t| t.parse::<u32>().unwrap_or(0)))
-        .unwrap_or(0);
+        .unwrap_or(1);
 
     let (string, fret) = extract_technical_info(&note_node, &pitch);
 
     let is_chord = note_node.children().any(|n| n.has_tag_name("chord"));
 
-    let note = Note { string, fret };
+    let note = Note {
+        string,
+        fret,
+        duration,
+        pitch,
+    };
 
     if !voice_state.first_note {
         if !voice_state.prev_is_chord || !is_chord {
@@ -224,12 +224,11 @@ pub fn parse_note(
     if voice_state.current_position >= measure.positions.len() {
         measure
             .positions
-            .resize_with(voice_state.current_position + 1, HashMap::new);
+            .resize_with(voice_state.current_position + 1, HashSet::new);
     }
 
-    if let (Some(s), Some(f)) = (note.string, note.fret) {
-        let note_key = NoteKey { string: s, fret: f };
-        measure.positions[voice_state.current_position].insert(note_key, note);
+    if let (Some(_), Some(_)) = (note.string, note.fret) {
+        measure.positions[voice_state.current_position].insert(note);
     }
 
     voice_state.first_note = false;
@@ -364,10 +363,10 @@ pub fn pitch_to_midi(pitch: &Pitch) -> u8 {
     (pitch.octave * 12) + semitone as u8
 }
 
-pub fn calculate_frequency(string: u8, fret: u8) -> f32 {
+pub fn calculate_frequency(note: &Note) -> f32 {
     let open_string_frequencies = [329.63, 246.94, 196.00, 146.83, 110.00, 82.41];
-    let string_index = (string - 1).min(5) as usize;
+    let string_index = (note.string.unwrap_or(1) - 1).min(5) as usize;
     let open_frequency = open_string_frequencies[string_index];
-    let frequency = open_frequency * (2f32).powf(fret as f32 / 12.0);
+    let frequency = open_frequency * (2f32).powf(note.fret.unwrap_or(0) as f32 / 12.0);
     frequency
 }
