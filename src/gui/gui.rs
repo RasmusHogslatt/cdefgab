@@ -1,8 +1,10 @@
+// gui.rs
+
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver},
-        Arc, Mutex,
+        Arc,
     },
     thread,
 };
@@ -20,6 +22,7 @@ use renderer::{render_score, score_info};
 
 use egui_plot::{Line, Plot, PlotPoints};
 
+#[derive(Clone)]
 pub struct Configs {
     pub custom_tempo: usize,
     pub use_custom_tempo: bool,
@@ -63,19 +66,19 @@ pub struct TabApp {
     notes_receiver: Option<Receiver<Vec<Note>>>,
     is_playing: bool,
     stop_flag: Arc<AtomicBool>,
-    pub configs: Configs,
+    pub configs: Configs, // Changed to regular Configs
     pub display_metrics: DisplayMetrics,
     pub previous_notes: Option<Vec<Note>>,
     pub current_notes: Option<Vec<Note>>,
     pub audio_player: AudioPlayer,
     pub audio_listener: AudioListener,
-    pub match_result_receiver: Receiver<bool>, // Updated type
-    pub expected_notes: Arc<Mutex<Option<Vec<Note>>>>,
+    pub match_result_receiver: Receiver<bool>,
+    pub expected_notes: Arc<std::sync::Mutex<Option<Vec<Note>>>>,
     pub is_match: bool,
     // New fields for accessing chroma and signal feature histories
-    pub input_chroma_history: Arc<Mutex<Vec<Vec<f32>>>>,
-    pub expected_chroma_history: Arc<Mutex<Vec<Vec<f32>>>>,
-    pub input_signal_history: Arc<Mutex<Vec<Vec<f32>>>>,
+    pub input_chroma_history: Arc<std::sync::Mutex<Vec<Vec<f32>>>>,
+    pub expected_chroma_history: Arc<std::sync::Mutex<Vec<Vec<f32>>>>,
+    pub input_signal_history: Arc<std::sync::Mutex<Vec<Vec<f32>>>>,
 }
 
 impl TabApp {
@@ -95,11 +98,13 @@ impl TabApp {
         // Initialize the stop flag
         let stop_flag = Arc::new(AtomicBool::new(false));
 
-        let audio_player = AudioPlayer::new();
+        // Clone configs to pass to AudioPlayer
+        let audio_player_configs = configs.clone();
+        let audio_player = AudioPlayer::new(audio_player_configs);
         audio_player.start();
 
         let (match_result_sender, match_result_receiver) = mpsc::channel();
-        let expected_notes = Arc::new(Mutex::new(None));
+        let expected_notes = Arc::new(std::sync::Mutex::new(None));
 
         let mut audio_listener =
             AudioListener::new(match_result_sender.clone(), expected_notes.clone());
@@ -172,6 +177,10 @@ impl TabApp {
             self.is_match = false;
         }
     }
+
+    fn update_audio_player_configs(&mut self) {
+        self.audio_player.update_configs(self.configs.clone());
+    }
 }
 
 impl eframe::App for TabApp {
@@ -189,45 +198,71 @@ impl eframe::App for TabApp {
             }
 
             ui.heading("Settings");
-            ui.checkbox(&mut self.configs.use_custom_tempo, "Custom tempo");
-            if self.configs.use_custom_tempo {
-                ui.add(egui::Slider::new(&mut self.configs.custom_tempo, 1..=240));
+            {
+                let mut cfg = &mut self.configs;
+                if ui
+                    .checkbox(&mut cfg.use_custom_tempo, "Custom tempo")
+                    .changed()
+                {
+                    // self.update_audio_player_configs();
+                }
+                if cfg.use_custom_tempo {
+                    if ui
+                        .add(egui::Slider::new(&mut cfg.custom_tempo, 1..=240))
+                        .changed()
+                    {
+                        self.update_audio_player_configs();
+                    }
+                }
             }
 
             ui.separator();
             ui.heading("Audio Settings");
 
-            ui.horizontal(|ui| {
-                ui.label("Decay:");
-                ui.add(egui::Slider::new(&mut self.configs.decay, 0.9..=1.0).step_by(0.001));
-            });
+            {
+                let mut cfg = &mut self.configs;
+                let mut decay_changed = false;
+                let mut volume_changed = false;
 
-            ui.horizontal(|ui| {
-                ui.label("Volume:");
-                ui.add(egui::Slider::new(&mut self.configs.volume, 0.0..=1.0).step_by(0.01));
-            });
+                ui.horizontal(|ui| {
+                    ui.label("Decay:");
+                    if ui
+                        .add(egui::Slider::new(&mut cfg.decay, 0.9..=1.0).step_by(0.001))
+                        .changed()
+                    {
+                        decay_changed = true;
+                    }
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Volume:");
+                    if ui
+                        .add(egui::Slider::new(&mut cfg.volume, 0.0..=1.0).step_by(0.01))
+                        .changed()
+                    {
+                        volume_changed = true;
+                    }
+                });
+
+                if decay_changed || volume_changed {
+                    self.update_audio_player_configs();
+                }
+            }
 
             ui.separator();
             ui.heading("Score Info");
 
-            match (&self.configs.use_custom_tempo, &self.score) {
-                (true, Some(score)) => {
-                    let seconds_per_beat = 60.0 / self.configs.custom_tempo as f32;
-                    let seconds_per_division =
-                        seconds_per_beat / score.divisions_per_quarter as f32;
-                    self.display_metrics.total_score_time = score.measures.len() as f32
-                        * seconds_per_division
-                        * score.divisions_per_measure as f32;
-                }
-                (false, Some(score)) => {
-                    let seconds_per_beat = 60.0 / score.tempo as f32;
-                    let seconds_per_division =
-                        seconds_per_beat / score.divisions_per_quarter as f32;
-                    self.display_metrics.total_score_time = score.measures.len() as f32
-                        * seconds_per_division
-                        * score.divisions_per_measure as f32;
-                }
-                _ => {}
+            if let Some(score) = &self.score {
+                let cfg = &self.configs;
+                let seconds_per_beat = if cfg.use_custom_tempo {
+                    60.0 / cfg.custom_tempo as f32
+                } else {
+                    60.0 / score.tempo as f32
+                };
+                let seconds_per_division = seconds_per_beat / score.divisions_per_quarter as f32;
+                self.display_metrics.total_score_time = score.measures.len() as f32
+                    * seconds_per_division
+                    * score.divisions_per_measure as f32;
             }
 
             ui.label(format!(
@@ -372,28 +407,25 @@ impl eframe::App for TabApp {
                     // Update expected notes for the AudioListener
                     let mut expected_notes = self.expected_notes.lock().unwrap();
                     *expected_notes = Some(notes.clone());
-                    match self.configs.use_custom_tempo {
-                        true => self.audio_player.update_seconds_per_division(
-                            self.configs.custom_tempo as f32,
-                            score.divisions_per_quarter as f32,
-                        ),
-                        false => self.audio_player.update_seconds_per_division(
-                            score.tempo as f32,
-                            score.divisions_per_quarter as f32,
-                        ),
-                    }
+                    let seconds_per_division = {
+                        let cfg = &self.configs;
+                        if cfg.use_custom_tempo {
+                            60.0 / cfg.custom_tempo as f32 / score.divisions_per_quarter as f32
+                        } else {
+                            60.0 / score.tempo as f32 / score.divisions_per_quarter as f32
+                        }
+                    };
+                    self.display_metrics.total_score_time = score.measures.len() as f32
+                        * seconds_per_division
+                        * score.divisions_per_measure as f32;
 
                     println!(
                         "Seconds per division: {}",
                         self.audio_player.seconds_per_division
                     );
                     // Play the notes
-                    self.audio_player.play_notes_with_config(
-                        &notes,
-                        &self.configs,
-                        self.configs.volume,
-                        self.audio_player.seconds_per_division,
-                    );
+                    self.audio_player
+                        .play_notes_with_config(&notes, self.audio_player.seconds_per_division);
                 }
             }
             // Request repaint to update the UI
@@ -402,7 +434,7 @@ impl eframe::App for TabApp {
 
         // Receive match result from AudioListener
         while let Ok(is_match) = self.match_result_receiver.try_recv() {
-            if self.current_notes.is_some() && self.is_playing {
+            if self.is_playing && self.current_notes.is_some() {
                 self.is_match = is_match;
             } else {
                 self.is_match = false;
@@ -411,8 +443,9 @@ impl eframe::App for TabApp {
 
         // Update the AudioPlayer's decay and volume based on the GUI settings
         {
-            let decay = self.configs.decay;
-            let volume = self.configs.volume;
+            let cfg = &self.configs;
+            let decay = cfg.decay;
+            let volume = cfg.volume;
             self.audio_player.set_decay(decay);
             self.audio_player.set_volume(volume);
         }

@@ -13,13 +13,13 @@ pub struct AudioPlayer {
     stream: Stream,
     active_notes: Arc<Mutex<Vec<KarplusStrong>>>,
     pub sample_rate: f32,
-    volume: Arc<Mutex<f32>>,
+    volume: f32, // Changed from Arc<Mutex<f32>> to f32
     pub seconds_per_division: f32,
-    pub config: Arc<Mutex<Configs>>,
+    pub configs: Configs, // Now stores its own Configs
 }
 
 impl AudioPlayer {
-    pub fn new() -> Self {
+    pub fn new(configs: Configs) -> Self {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
@@ -29,17 +29,28 @@ impl AudioPlayer {
         let channels = config.channels() as usize;
 
         let active_notes = Arc::new(Mutex::new(Vec::new()));
-        let active_notes_clone = active_notes.clone();
+        let active_notes_clone = Arc::clone(&active_notes);
 
-        let volume = Arc::new(Mutex::new(0.5)); // Default volume
-        let volume_clone = volume.clone();
+        let volume = configs.volume;
+
+        let configs_clone = configs.clone();
 
         let stream = match config.sample_format() {
             SampleFormat::F32 => device
                 .build_output_stream(
                     &config.into(),
-                    move |data: &mut [f32], _| {
-                        Self::write_data(data, channels, &active_notes_clone, &volume_clone);
+                    {
+                        // Clone necessary Arcs and configurations for the closure
+                        move |data: &mut [f32], _| {
+                            AudioPlayer::write_data(
+                                data,
+                                channels,
+                                &active_notes_clone,
+                                volume,
+                                &configs_clone,
+                                sample_rate,
+                            );
+                        }
                     },
                     |err| eprintln!("Stream error: {}", err),
                     None,
@@ -54,6 +65,7 @@ impl AudioPlayer {
             sample_rate,
             volume,
             seconds_per_division,
+            configs,
         }
     }
 
@@ -66,23 +78,24 @@ impl AudioPlayer {
         self.seconds_per_division = seconds_per_beat / divisions_per_quarter;
     }
 
+    /// Static method to write audio data
     fn write_data(
-        &self,
         output: &mut [f32],
         channels: usize,
         active_notes: &Arc<Mutex<Vec<KarplusStrong>>>,
-        volume: &Arc<Mutex<f32>>,
-        guitar_config: &GuitarConfig,
+        volume: f32,
+        configs: &Configs,
+        sample_rate: f32,
     ) {
         let mut active_notes = active_notes.lock().unwrap();
-        let volume = *volume.lock().unwrap();
+        let guitar_config = &configs.custom_guitar_config;
 
         for frame in output.chunks_mut(channels) {
             let mut value = 0.0;
 
             // Sum samples from all active notes
             active_notes.retain_mut(|note| {
-                if let Some(sample) = note.next_sample(guitar_config, self.sample_rate) {
+                if let Some(sample) = note.next_sample(guitar_config, sample_rate) {
                     value += sample;
                     true
                 } else {
@@ -102,15 +115,8 @@ impl AudioPlayer {
         }
     }
 
-    pub fn play_notes_with_config(
-        &self,
-        notes: &[Note],
-        config: &Configs,
-        volume: f32,
-        seconds_per_division: f32,
-    ) {
-        // Update volume
-        self.set_volume(volume);
+    pub fn play_notes_with_config(&self, notes: &[Note], seconds_per_division: f32) {
+        let guitar_config = &self.configs.custom_guitar_config;
 
         let mut active_notes = self.active_notes.lock().unwrap();
         for note in notes {
@@ -120,14 +126,14 @@ impl AudioPlayer {
                 frequency,
                 seconds_per_division * note.duration as f32,
                 self.sample_rate,
-                &config.custom_guitar_config,
+                guitar_config,
             );
             active_notes.push(ks);
         }
     }
 
     /// Sets a new decay parameter for all active notes.
-    pub fn set_decay(&self, new_decay: f32) {
+    pub fn set_decay(&mut self, new_decay: f32) {
         let mut active_notes = self.active_notes.lock().unwrap();
         for ks in active_notes.iter_mut() {
             ks.decay = new_decay;
@@ -135,12 +141,18 @@ impl AudioPlayer {
     }
 
     /// Sets a new volume parameter.
-    pub fn set_volume(&self, new_volume: f32) {
-        let mut vol = self.volume.lock().unwrap();
-        *vol = new_volume;
+    pub fn set_volume(&mut self, new_volume: f32) {
+        self.volume = new_volume;
+    }
+
+    /// Updates the AudioPlayer's configurations.
+    pub fn update_configs(&mut self, configs: Configs) {
+        self.configs = configs;
+        self.volume = self.configs.volume;
     }
 }
 
+#[derive(Clone)]
 pub struct GuitarConfig {
     pub decay: f32,
     pub string_damping: f32,
@@ -213,14 +225,10 @@ impl KarplusStrong {
         let resonated = string_sample * body_freq.sin();
         let body_sample = resonated * (1.0 - config.body_damping);
 
-        // let new_value = self.decay * 0.5 * (current_value + next_value);
-
-        // self.buffer[self.position] = new_value;
         self.buffer[self.position] = string_sample;
         self.position = next_index;
         self.remaining_samples -= 1;
 
-        // Some(current_value)
         Some(string_sample * 0.7 + body_sample * 0.3)
     }
 }
