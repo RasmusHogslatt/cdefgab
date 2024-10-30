@@ -75,11 +75,6 @@ impl AudioPlayer {
         self.stream.play().expect("Failed to start audio stream");
     }
 
-    pub fn update_seconds_per_division(&mut self, tempo: f32, divisions_per_quarter: f32) {
-        let seconds_per_beat = 60.0 / tempo;
-        self.seconds_per_division = seconds_per_beat / divisions_per_quarter;
-    }
-
     /// Static method to write audio data
     fn write_data(
         output: &mut [f32],
@@ -165,7 +160,7 @@ pub struct GuitarConfig {
     pub body_resonance: f32,
     pub body_damping: f32,
     pub pickup_position: f32,
-    pub name: String,
+    pub name: String, // Change to ENUM and implement a name trait
 }
 
 impl GuitarConfig {

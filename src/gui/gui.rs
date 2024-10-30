@@ -245,16 +245,17 @@ impl eframe::App for TabApp {
                         }
                     }
                 });
-
-            ui.horizontal(|ui| {
-                ui.label("Decay:");
-                if ui
-                    .add(egui::Slider::new(&mut self.configs.decay, 0.9..=1.0).step_by(0.001))
-                    .changed()
-                {
-                    decay_changed = true;
-                }
-            });
+            if self.configs.active_guitar == 0 {
+                ui.horizontal(|ui| {
+                    ui.label("Decay:");
+                    if ui
+                        .add(egui::Slider::new(&mut self.configs.decay, 0.9..=1.0).step_by(0.001))
+                        .changed()
+                    {
+                        decay_changed = true;
+                    }
+                });
+            }
 
             ui.horizontal(|ui| {
                 ui.label("Volume:");
