@@ -73,11 +73,6 @@ impl AudioPlayer {
         self.stream.play().expect("Failed to start audio stream");
     }
 
-    pub fn update_seconds_per_division(&mut self, tempo: f32, divisions_per_quarter: f32) {
-        let seconds_per_beat = 60.0 / tempo;
-        self.seconds_per_division = seconds_per_beat / divisions_per_quarter;
-    }
-
     /// Static method to write audio data
     fn write_data(
         output: &mut [f32],
@@ -88,7 +83,8 @@ impl AudioPlayer {
         sample_rate: f32,
     ) {
         let mut active_notes = active_notes.lock().unwrap();
-        let guitar_config = &configs.custom_guitar_config;
+        let guitar_config = &configs.guitar_configs[configs.active_guitar];
+        println!("Guitar:{}", guitar_config.name);
 
         for frame in output.chunks_mut(channels) {
             let mut value = 0.0;
@@ -116,7 +112,7 @@ impl AudioPlayer {
     }
 
     pub fn play_notes_with_config(&self, notes: &[Note], seconds_per_division: f32) {
-        let guitar_config = &self.configs.custom_guitar_config;
+        let guitar_config = &self.configs.guitar_configs[self.configs.active_guitar];
 
         let mut active_notes = self.active_notes.lock().unwrap();
         for note in notes {
@@ -159,6 +155,7 @@ pub struct GuitarConfig {
     pub body_resonance: f32,
     pub body_damping: f32,
     pub pickup_position: f32,
+    pub name: String,
 }
 
 impl GuitarConfig {
@@ -169,6 +166,29 @@ impl GuitarConfig {
             body_resonance: 100.0,
             body_damping: 0.1,
             pickup_position: 0.85,
+            name: "Acoustic".to_string(),
+        }
+    }
+
+    pub fn electric() -> Self {
+        GuitarConfig {
+            decay: 0.995,
+            string_damping: 0.1,
+            body_resonance: 150.0,
+            body_damping: 0.3,
+            pickup_position: 0.8,
+            name: "Electric".to_string(),
+        }
+    }
+
+    pub fn classical() -> Self {
+        GuitarConfig {
+            decay: 0.997,
+            string_damping: 0.3,
+            body_resonance: 90.0,
+            body_damping: 0.05,
+            pickup_position: 0.85,
+            name: "Classical".to_string(),
         }
     }
 }

@@ -31,7 +31,8 @@ pub struct Configs {
     pub dashes_per_division: usize,
     pub decay: f32,
     pub volume: f32,
-    pub custom_guitar_config: GuitarConfig,
+    pub guitar_configs: Vec<GuitarConfig>,
+    pub active_guitar: usize,
 }
 
 pub struct DisplayMetrics {
@@ -48,13 +49,20 @@ impl Configs {
             dashes_per_division: 4,
             decay: 0.996,
             volume: 0.5,
-            custom_guitar_config: GuitarConfig {
-                decay: 0.96,
-                string_damping: 0.5,
-                body_resonance: 100.0,
-                body_damping: 0.5,
-                pickup_position: 0.85,
-            },
+            guitar_configs: vec![
+                GuitarConfig {
+                    decay: 0.96,
+                    string_damping: 0.5,
+                    body_resonance: 100.0,
+                    body_damping: 0.5,
+                    pickup_position: 0.85,
+                    name: "Custom".to_string(),
+                },
+                GuitarConfig::acoustic(),
+                GuitarConfig::electric(),
+                GuitarConfig::classical(),
+            ],
+            active_guitar: 0,
         }
     }
 }
@@ -199,7 +207,7 @@ impl eframe::App for TabApp {
 
             ui.heading("Settings");
             {
-                let mut cfg = &mut self.configs;
+                let cfg = &mut self.configs;
                 if ui
                     .checkbox(&mut cfg.use_custom_tempo, "Custom tempo")
                     .changed()
@@ -218,35 +226,49 @@ impl eframe::App for TabApp {
 
             ui.separator();
             ui.heading("Audio Settings");
-
-            {
-                let mut cfg = &mut self.configs;
-                let mut decay_changed = false;
-                let mut volume_changed = false;
-
-                ui.horizontal(|ui| {
-                    ui.label("Decay:");
-                    if ui
-                        .add(egui::Slider::new(&mut cfg.decay, 0.9..=1.0).step_by(0.001))
-                        .changed()
-                    {
-                        decay_changed = true;
+            // let mut cfg = &mut self.configs;
+            let mut decay_changed = false;
+            let mut volume_changed = false;
+            let mut guitar_type_changed = false;
+            egui::ComboBox::new("guitar_selection", "Guitar type")
+                .selected_text(
+                    self.configs.guitar_configs[self.configs.active_guitar]
+                        .name
+                        .clone(),
+                )
+                .show_ui(ui, |ui| {
+                    for (index, guitar) in self.configs.guitar_configs.iter().enumerate() {
+                        // Check if this guitar is currently selected
+                        let checked = index == self.configs.active_guitar;
+                        if ui.selectable_label(checked, &guitar.name).clicked() {
+                            self.configs.active_guitar = index;
+                            guitar_type_changed = true;
+                        }
                     }
                 });
 
-                ui.horizontal(|ui| {
-                    ui.label("Volume:");
-                    if ui
-                        .add(egui::Slider::new(&mut cfg.volume, 0.0..=1.0).step_by(0.01))
-                        .changed()
-                    {
-                        volume_changed = true;
-                    }
-                });
-
-                if decay_changed || volume_changed {
-                    self.update_audio_player_configs();
+            ui.horizontal(|ui| {
+                ui.label("Decay:");
+                if ui
+                    .add(egui::Slider::new(&mut self.configs.decay, 0.9..=1.0).step_by(0.001))
+                    .changed()
+                {
+                    decay_changed = true;
                 }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Volume:");
+                if ui
+                    .add(egui::Slider::new(&mut self.configs.volume, 0.0..=1.0).step_by(0.01))
+                    .changed()
+                {
+                    volume_changed = true;
+                }
+            });
+
+            if decay_changed || volume_changed || guitar_type_changed {
+                self.update_audio_player_configs();
             }
 
             ui.separator();
