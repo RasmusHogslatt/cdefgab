@@ -74,7 +74,7 @@ pub struct TabApp {
     notes_receiver: Option<Receiver<Vec<Note>>>,
     is_playing: bool,
     stop_flag: Arc<AtomicBool>,
-    pub configs: Configs, // Changed to regular Configs
+    pub configs: Configs,
     pub display_metrics: DisplayMetrics,
     pub previous_notes: Option<Vec<Note>>,
     pub current_notes: Option<Vec<Note>>,
@@ -226,7 +226,6 @@ impl eframe::App for TabApp {
 
             ui.separator();
             ui.heading("Audio Settings");
-            // let mut cfg = &mut self.configs;
             let mut decay_changed = false;
             let mut volume_changed = false;
             let mut guitar_type_changed = false;

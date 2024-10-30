@@ -13,9 +13,9 @@ pub struct AudioPlayer {
     stream: Stream,
     active_notes: Arc<Mutex<Vec<KarplusStrong>>>,
     pub sample_rate: f32,
-    volume: f32, // Changed from Arc<Mutex<f32>> to f32
+    volume: f32,
     pub seconds_per_division: f32,
-    pub configs: Configs, // Now stores its own Configs
+    pub configs: Arc<Mutex<Configs>>,
 }
 
 impl AudioPlayer {
@@ -33,6 +33,8 @@ impl AudioPlayer {
 
         let volume = configs.volume;
 
+        // Wrap configs in Arc<Mutex<...>> for thread-safe shared access
+        let configs = Arc::new(Mutex::new(configs));
         let configs_clone = configs.clone();
 
         let stream = match config.sample_format() {
@@ -47,7 +49,7 @@ impl AudioPlayer {
                                 channels,
                                 &active_notes_clone,
                                 volume,
-                                &configs_clone,
+                                &configs_clone, // Pass the Arc<Mutex<Configs>>
                                 sample_rate,
                             );
                         }
@@ -73,16 +75,22 @@ impl AudioPlayer {
         self.stream.play().expect("Failed to start audio stream");
     }
 
+    pub fn update_seconds_per_division(&mut self, tempo: f32, divisions_per_quarter: f32) {
+        let seconds_per_beat = 60.0 / tempo;
+        self.seconds_per_division = seconds_per_beat / divisions_per_quarter;
+    }
+
     /// Static method to write audio data
     fn write_data(
         output: &mut [f32],
         channels: usize,
         active_notes: &Arc<Mutex<Vec<KarplusStrong>>>,
         volume: f32,
-        configs: &Configs,
+        configs: &Arc<Mutex<Configs>>,
         sample_rate: f32,
     ) {
         let mut active_notes = active_notes.lock().unwrap();
+        let configs = configs.lock().unwrap(); // Lock to access current configs
         let guitar_config = &configs.guitar_configs[configs.active_guitar];
         println!("Guitar:{}", guitar_config.name);
 
@@ -112,7 +120,8 @@ impl AudioPlayer {
     }
 
     pub fn play_notes_with_config(&self, notes: &[Note], seconds_per_division: f32) {
-        let guitar_config = &self.configs.guitar_configs[self.configs.active_guitar];
+        let configs = self.configs.lock().unwrap();
+        let guitar_config = &configs.guitar_configs[configs.active_guitar];
 
         let mut active_notes = self.active_notes.lock().unwrap();
         for note in notes {
@@ -143,8 +152,9 @@ impl AudioPlayer {
 
     /// Updates the AudioPlayer's configurations.
     pub fn update_configs(&mut self, configs: Configs) {
-        self.configs = configs;
-        self.volume = self.configs.volume;
+        let mut guard = self.configs.lock().unwrap();
+        *guard = configs;
+        self.volume = guard.volume;
     }
 }
 
