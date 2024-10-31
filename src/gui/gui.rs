@@ -194,6 +194,7 @@ impl TabApp {
 impl eframe::App for TabApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Left panel with playback controls
+        let mut changed_config = false;
         egui::SidePanel::left("left_panel").show(ctx, |ui| {
             ui.heading("Playback Controls");
 
@@ -226,9 +227,6 @@ impl eframe::App for TabApp {
 
             ui.separator();
             ui.heading("Audio Settings");
-            let mut decay_changed = false;
-            let mut volume_changed = false;
-            let mut guitar_type_changed = false;
             egui::ComboBox::new("guitar_selection", "Guitar type")
                 .selected_text(format!(
                     "{}",
@@ -243,7 +241,7 @@ impl eframe::App for TabApp {
                             .clicked()
                         {
                             self.configs.active_guitar = index;
-                            guitar_type_changed = true;
+                            changed_config = true;
                         }
                     }
                 });
@@ -254,7 +252,7 @@ impl eframe::App for TabApp {
                         .add(egui::Slider::new(&mut self.configs.decay, 0.9..=1.0).step_by(0.001))
                         .changed()
                     {
-                        decay_changed = true;
+                        changed_config = true;
                     }
                 });
             }
@@ -265,13 +263,9 @@ impl eframe::App for TabApp {
                     .add(egui::Slider::new(&mut self.configs.volume, 0.0..=1.0).step_by(0.01))
                     .changed()
                 {
-                    volume_changed = true;
+                    changed_config = true;
                 }
             });
-
-            if decay_changed || volume_changed || guitar_type_changed {
-                self.update_audio_player_configs();
-            }
 
             ui.separator();
             ui.heading("Score Info");
@@ -466,14 +460,15 @@ impl eframe::App for TabApp {
         }
 
         // Update the AudioPlayer's decay and volume based on the GUI settings
-        {
-            let cfg = &self.configs;
-            let decay = cfg.decay;
-            let volume = cfg.volume;
-            self.audio_player.set_decay(decay);
-            self.audio_player.set_volume(volume);
-        }
 
+        let cfg = &self.configs;
+        let decay = cfg.decay;
+        let volume = cfg.volume;
+        self.audio_player.set_decay(decay);
+
+        if changed_config {
+            self.update_audio_player_configs();
+        }
         // Check if playback has finished
         if self.is_playing && self.stop_flag.load(Ordering::Relaxed) {
             self.is_playing = false;

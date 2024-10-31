@@ -4,8 +4,8 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream};
 use rand::random;
 use std::f32::consts::PI;
+use std::fmt;
 use std::sync::{Arc, Mutex};
-use std::{default, fmt};
 
 use crate::gui::gui::Configs;
 use crate::music_representation::musical_structures::{calculate_frequency, Note};
@@ -43,13 +43,11 @@ impl AudioPlayer {
                 .build_output_stream(
                     &config.into(),
                     {
-                        // Clone necessary Arcs and configurations for the closure
                         move |data: &mut [f32], _| {
                             AudioPlayer::write_data(
                                 data,
                                 channels,
                                 &active_notes_clone,
-                                volume,
                                 &configs_clone, // Pass the Arc<Mutex<Configs>>
                                 sample_rate,
                             );
@@ -61,6 +59,7 @@ impl AudioPlayer {
                 .unwrap(),
             _ => panic!("Unsupported sample format"),
         };
+
         let seconds_per_division = 0.5;
         Self {
             stream,
@@ -77,18 +76,16 @@ impl AudioPlayer {
     }
 
     /// Static method to write audio data
-    fn write_data(
+    pub fn write_data(
         output: &mut [f32],
         channels: usize,
         active_notes: &Arc<Mutex<Vec<KarplusStrong>>>,
-        volume: f32,
         configs: &Arc<Mutex<Configs>>,
         sample_rate: f32,
     ) {
         let mut active_notes = active_notes.lock().unwrap();
         let configs = configs.lock().unwrap(); // Lock to access current configs
         let guitar_config = &configs.guitar_configs[configs.active_guitar];
-        println!("Guitar:{}", guitar_config.name);
 
         for frame in output.chunks_mut(channels) {
             let mut value = 0.0;
@@ -103,8 +100,8 @@ impl AudioPlayer {
                 }
             });
 
-            // Apply volume
-            value *= volume;
+            // Apply volume from configs
+            value *= configs.volume;
 
             // Prevent clipping
             value = value.clamp(-1.0, 1.0);
@@ -139,11 +136,6 @@ impl AudioPlayer {
         for ks in active_notes.iter_mut() {
             ks.decay = new_decay;
         }
-    }
-
-    /// Sets a new volume parameter.
-    pub fn set_volume(&mut self, new_volume: f32) {
-        self.volume = new_volume;
     }
 
     /// Updates the AudioPlayer's configurations.
@@ -181,7 +173,7 @@ pub struct GuitarConfig {
     pub body_resonance: f32,
     pub body_damping: f32,
     pub pickup_position: f32,
-    pub name: GuitarType, // Change to ENUM and implement a name trait
+    pub name: GuitarType,
 }
 
 impl GuitarConfig {
