@@ -29,7 +29,6 @@ pub struct Configs {
     pub file_path: Option<String>,
     pub measures_per_row: usize,
     pub dashes_per_division: usize,
-    pub decay: f32,
     pub volume: f32,
     pub guitar_configs: Vec<GuitarConfig>,
     pub active_guitar: usize,
@@ -47,11 +46,10 @@ impl Configs {
             file_path: Some("silent.xml".to_owned()),
             measures_per_row: 4,
             dashes_per_division: 4,
-            decay: 0.996,
             volume: 0.5,
             guitar_configs: vec![
                 GuitarConfig {
-                    decay: 0.96,
+                    decay: 0.996,
                     string_damping: 0.5,
                     body_resonance: 100.0,
                     body_damping: 0.5,
@@ -249,7 +247,13 @@ impl eframe::App for TabApp {
                 ui.horizontal(|ui| {
                     ui.label("Decay:");
                     if ui
-                        .add(egui::Slider::new(&mut self.configs.decay, 0.9..=1.0).step_by(0.001))
+                        .add(
+                            egui::Slider::new(
+                                &mut self.configs.guitar_configs[0].decay, // Directly modify custom guitar's decay
+                                0.9..=1.0,
+                            )
+                            .step_by(0.001),
+                        )
                         .changed()
                     {
                         changed_config = true;
@@ -459,16 +463,10 @@ impl eframe::App for TabApp {
             }
         }
 
-        // Update the AudioPlayer's decay and volume based on the GUI settings
-
-        let cfg = &self.configs;
-        let decay = cfg.decay;
-        let volume = cfg.volume;
-        self.audio_player.set_decay(decay);
-
         if changed_config {
             self.update_audio_player_configs();
         }
+
         // Check if playback has finished
         if self.is_playing && self.stop_flag.load(Ordering::Relaxed) {
             self.is_playing = false;

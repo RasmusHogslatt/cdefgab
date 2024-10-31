@@ -76,7 +76,7 @@ impl AudioPlayer {
     }
 
     /// Static method to write audio data
-    pub fn write_data(
+    fn write_data(
         output: &mut [f32],
         channels: usize,
         active_notes: &Arc<Mutex<Vec<KarplusStrong>>>,
@@ -127,14 +127,6 @@ impl AudioPlayer {
                 guitar_config,
             );
             active_notes.push(ks);
-        }
-    }
-
-    /// Sets a new decay parameter for all active notes.
-    pub fn set_decay(&mut self, new_decay: f32) {
-        let mut active_notes = self.active_notes.lock().unwrap();
-        for ks in active_notes.iter_mut() {
-            ks.decay = new_decay;
         }
     }
 
@@ -215,7 +207,6 @@ pub struct KarplusStrong {
     pub buffer: Vec<f32>,
     pub position: usize,
     pub remaining_samples: usize,
-    pub decay: f32,
 }
 
 impl KarplusStrong {
@@ -242,7 +233,6 @@ impl KarplusStrong {
             buffer,
             position: 0,
             remaining_samples,
-            decay: config.decay,
         }
     }
 
@@ -255,7 +245,8 @@ impl KarplusStrong {
         let next_index = (self.position + 1) % self.buffer.len();
         let next_value = self.buffer[next_index];
 
-        let string_sample = self.decay
+        // Use config.decay instead of self.decay
+        let string_sample = config.decay
             * (config.string_damping * current_value + (1.0 - config.string_damping) * next_value);
 
         let body_freq = 2.0 * PI * config.body_resonance / sample_rate;
