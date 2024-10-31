@@ -11,7 +11,7 @@ use std::{
 
 use crate::{
     audio_listener::audio_listener::AudioListener,
-    audio_player::audio_player::{AudioPlayer, GuitarConfig},
+    audio_player::audio_player::{AudioPlayer, GuitarConfig, GuitarType},
     music_representation::musical_structures::{Note, Score},
     renderer::*,
     time_scrubber::time_scrubber::TimeScrubber,
@@ -44,7 +44,7 @@ impl Configs {
         Self {
             custom_tempo: 120,
             use_custom_tempo: false,
-            file_path: Some("greensleeves.xml".to_owned()),
+            file_path: Some("silent.xml".to_owned()),
             measures_per_row: 4,
             dashes_per_division: 4,
             decay: 0.996,
@@ -56,7 +56,7 @@ impl Configs {
                     body_resonance: 100.0,
                     body_damping: 0.5,
                     pickup_position: 0.85,
-                    name: "Custom".to_string(),
+                    name: GuitarType::Custom,
                 },
                 GuitarConfig::acoustic(),
                 GuitarConfig::electric(),
@@ -230,16 +230,18 @@ impl eframe::App for TabApp {
             let mut volume_changed = false;
             let mut guitar_type_changed = false;
             egui::ComboBox::new("guitar_selection", "Guitar type")
-                .selected_text(
-                    self.configs.guitar_configs[self.configs.active_guitar]
-                        .name
-                        .clone(),
-                )
+                .selected_text(format!(
+                    "{}",
+                    self.configs.guitar_configs[self.configs.active_guitar].name
+                ))
                 .show_ui(ui, |ui| {
                     for (index, guitar) in self.configs.guitar_configs.iter().enumerate() {
                         // Check if this guitar is currently selected
                         let checked = index == self.configs.active_guitar;
-                        if ui.selectable_label(checked, &guitar.name).clicked() {
+                        if ui
+                            .selectable_label(checked, format!("{}", &guitar.name))
+                            .clicked()
+                        {
                             self.configs.active_guitar = index;
                             guitar_type_changed = true;
                         }

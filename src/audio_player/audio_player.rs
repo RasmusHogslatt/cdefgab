@@ -5,6 +5,7 @@ use cpal::{SampleFormat, Stream};
 use rand::random;
 use std::f32::consts::PI;
 use std::sync::{Arc, Mutex};
+use std::{default, fmt};
 
 use crate::gui::gui::Configs;
 use crate::music_representation::musical_structures::{calculate_frequency, Note};
@@ -153,6 +154,26 @@ impl AudioPlayer {
     }
 }
 
+#[derive(Default, Clone, Debug)]
+pub enum GuitarType {
+    #[default]
+    Custom,
+    Acoustic,
+    Classical,
+    Electric,
+}
+
+impl fmt::Display for GuitarType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GuitarType::Custom => write!(f, "Custom"),
+            GuitarType::Acoustic => write!(f, "Acoustic"),
+            GuitarType::Classical => write!(f, "Classical"),
+            GuitarType::Electric => write!(f, "Electric"),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct GuitarConfig {
     pub decay: f32,
@@ -160,7 +181,7 @@ pub struct GuitarConfig {
     pub body_resonance: f32,
     pub body_damping: f32,
     pub pickup_position: f32,
-    pub name: String, // Change to ENUM and implement a name trait
+    pub name: GuitarType, // Change to ENUM and implement a name trait
 }
 
 impl GuitarConfig {
@@ -171,7 +192,7 @@ impl GuitarConfig {
             body_resonance: 100.0,
             body_damping: 0.1,
             pickup_position: 0.85,
-            name: "Acoustic".to_string(),
+            name: GuitarType::Acoustic,
         }
     }
 
@@ -182,7 +203,7 @@ impl GuitarConfig {
             body_resonance: 150.0,
             body_damping: 0.3,
             pickup_position: 0.8,
-            name: "Electric".to_string(),
+            name: GuitarType::Electric,
         }
     }
 
@@ -193,7 +214,7 @@ impl GuitarConfig {
             body_resonance: 90.0,
             body_damping: 0.05,
             pickup_position: 0.85,
-            name: "Classical".to_string(),
+            name: GuitarType::Classical,
         }
     }
 }
