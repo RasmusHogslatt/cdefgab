@@ -363,10 +363,27 @@ pub fn pitch_to_midi(pitch: &Pitch) -> u8 {
     (pitch.octave * 12) + semitone as u8
 }
 
-pub fn calculate_frequency(note: &Note) -> f32 {
+pub fn calculate_frequency(note: &Note, scale_length: f32, capo_fret: u8) -> f32 {
+    // Define the standard scale length (e.g., 25.5 inches for many guitars)
+    const STANDARD_SCALE_LENGTH: f32 = 25.5;
+    const MAX_FRET: u8 = 24;
+
     let open_string_frequencies = [329.63, 246.94, 196.00, 146.83, 110.00, 82.41];
     let string_index = (note.string.unwrap_or(1) - 1).min(5) as usize;
     let open_frequency = open_string_frequencies[string_index];
-    let frequency = open_frequency * (2f32).powf(note.fret.unwrap_or(0) as f32 / 12.0);
-    frequency
+
+    // Effective fret number considering the capo
+    let mut effective_fret = note.fret.unwrap_or(0) + capo_fret;
+    if effective_fret > MAX_FRET {
+        effective_fret = MAX_FRET;
+    }
+
+    // Calculate the base frequency based on the effective fret number
+    let base_frequency = open_frequency * (2f32).powf(effective_fret as f32 / 12.0);
+
+    // Adjust the frequency based on the scale length
+    // Frequency is inversely proportional to scale length: f_new = f_standard * (STANDARD_L / actual_L)
+    let adjusted_frequency = base_frequency * (STANDARD_SCALE_LENGTH / scale_length);
+
+    adjusted_frequency
 }

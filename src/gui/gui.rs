@@ -1,5 +1,3 @@
-// gui.rs
-
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -11,7 +9,7 @@ use std::{
 
 use crate::{
     audio_listener::audio_listener::AudioListener,
-    audio_player::audio_player::{AudioPlayer, GuitarConfig, GuitarType},
+    audio_player::audio_player::{AudioPlayer, GuitarConfig},
     music_representation::musical_structures::{Note, Score},
     renderer::*,
     time_scrubber::time_scrubber::TimeScrubber,
@@ -41,26 +39,28 @@ pub struct DisplayMetrics {
 impl Configs {
     pub fn new() -> Self {
         Self {
+            volume: 0.5,
+            active_guitar: 0,
+            guitar_configs: vec![
+                GuitarConfig::custom(
+                    0.996, // decay
+                    0.5,   // string_damping
+                    100.0, // body_resonance
+                    0.5,   // body_damping
+                    0.7,   // string_tension
+                    25.5,  // scale_length
+                    0,     // capo_fret: No capo by default
+                ),
+                GuitarConfig::acoustic(),
+                GuitarConfig::electric(),
+                GuitarConfig::classical(),
+            ],
+            // Initialize other fields...
             custom_tempo: 120,
             use_custom_tempo: false,
             file_path: Some("silent.xml".to_owned()),
             measures_per_row: 4,
             dashes_per_division: 4,
-            volume: 0.5,
-            guitar_configs: vec![
-                GuitarConfig {
-                    decay: 0.996,
-                    string_damping: 0.5,
-                    body_resonance: 100.0,
-                    body_damping: 0.5,
-                    pickup_position: 0.85,
-                    name: GuitarType::Custom,
-                },
-                GuitarConfig::acoustic(),
-                GuitarConfig::electric(),
-                GuitarConfig::classical(),
-            ],
-            active_guitar: 0,
         }
     }
 }
@@ -243,24 +243,117 @@ impl eframe::App for TabApp {
                         }
                     }
                 });
+
             if self.configs.active_guitar == 0 {
-                ui.horizontal(|ui| {
-                    ui.label("Decay:");
-                    if ui
-                        .add(
-                            egui::Slider::new(
-                                &mut self.configs.guitar_configs[0].decay, // Directly modify custom guitar's decay
-                                0.9..=1.0,
+                egui::Grid::new("custom_guitar_config")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.label("Decay:");
+                        if ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut self.configs.guitar_configs[0].decay,
+                                    0.9..=1.0,
+                                )
+                                .step_by(0.001),
                             )
-                            .step_by(0.001),
-                        )
-                        .changed()
-                    {
-                        changed_config = true;
-                    }
-                });
+                            .changed()
+                        {
+                            changed_config = true;
+                        }
+                        ui.end_row();
+
+                        ui.label("String damping:");
+                        if ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut self.configs.guitar_configs[0].string_damping,
+                                    0.0..=1.0,
+                                )
+                                .step_by(0.001),
+                            )
+                            .changed()
+                        {
+                            changed_config = true;
+                        }
+                        ui.end_row();
+
+                        ui.label("Body damping:");
+                        if ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut self.configs.guitar_configs[0].body_damping,
+                                    0.0..=1.0,
+                                )
+                                .step_by(0.001),
+                            )
+                            .changed()
+                        {
+                            changed_config = true;
+                        }
+                        ui.end_row();
+
+                        ui.label("Body resonance:");
+                        if ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut self.configs.guitar_configs[0].body_resonance,
+                                    0.0..=500.0,
+                                )
+                                .step_by(0.1),
+                            )
+                            .changed()
+                        {
+                            changed_config = true;
+                        }
+                        ui.end_row();
+
+                        ui.label("String tension:");
+                        if ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut self.configs.guitar_configs[0].string_tension,
+                                    0.0..=1.0,
+                                )
+                                .step_by(0.001),
+                            )
+                            .changed()
+                        {
+                            changed_config = true;
+                        }
+                        ui.end_row();
+
+                        ui.label("Scale length:");
+                        if ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut self.configs.guitar_configs[0].scale_length,
+                                    10.0..=50.0, // Adjust range as needed
+                                )
+                                .step_by(0.1),
+                            )
+                            .changed()
+                        {
+                            changed_config = true;
+                        }
+                        ui.end_row();
+                    });
+            }
+            ui.label("Capo Fret:");
+            if ui
+                .add(
+                    egui::Slider::new(
+                        &mut self.configs.guitar_configs[self.configs.active_guitar].capo_fret,
+                        0..=24, // Assuming a maximum of 24 frets
+                    )
+                    .text("Fret"),
+                )
+                .changed()
+            {
+                changed_config = true;
             }
 
+            // Volume Control
             ui.horizontal(|ui| {
                 ui.label("Volume:");
                 if ui

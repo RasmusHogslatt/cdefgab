@@ -48,7 +48,7 @@ impl AudioPlayer {
                                 data,
                                 channels,
                                 &active_notes_clone,
-                                &configs_clone, // Pass the Arc<Mutex<Configs>>
+                                &configs_clone,
                                 sample_rate,
                             );
                         }
@@ -118,7 +118,12 @@ impl AudioPlayer {
 
         let mut active_notes = self.active_notes.lock().unwrap();
         for note in notes {
-            let frequency = calculate_frequency(note);
+            // Pass the scale_length and capo_fret to the calculate_frequency function
+            let frequency = calculate_frequency(
+                note,
+                guitar_config.scale_length,
+                guitar_config.capo_fret, // New parameter
+            );
 
             let ks = KarplusStrong::new(
                 frequency,
@@ -164,7 +169,9 @@ pub struct GuitarConfig {
     pub string_damping: f32,
     pub body_resonance: f32,
     pub body_damping: f32,
-    pub pickup_position: f32,
+    pub string_tension: f32,
+    pub scale_length: f32,
+    pub capo_fret: u8, // New Parameter: Fret number where capo is placed (0 = no capo)
     pub name: GuitarType,
 }
 
@@ -175,7 +182,9 @@ impl GuitarConfig {
             string_damping: 0.2,
             body_resonance: 100.0,
             body_damping: 0.1,
-            pickup_position: 0.85,
+            string_tension: 0.7,
+            scale_length: 25.5,
+            capo_fret: 0, // Default: No capo
             name: GuitarType::Acoustic,
         }
     }
@@ -186,7 +195,9 @@ impl GuitarConfig {
             string_damping: 0.1,
             body_resonance: 150.0,
             body_damping: 0.3,
-            pickup_position: 0.8,
+            string_tension: 0.8,
+            scale_length: 25.5,
+            capo_fret: 0, // Default: No capo
             name: GuitarType::Electric,
         }
     }
@@ -197,8 +208,34 @@ impl GuitarConfig {
             string_damping: 0.3,
             body_resonance: 90.0,
             body_damping: 0.05,
-            pickup_position: 0.85,
+            string_tension: 0.6,
+            scale_length: 25.0,
+            capo_fret: 0, // Default: No capo
             name: GuitarType::Classical,
+        }
+    }
+
+    pub fn custom(
+        decay: f32,
+        string_damping: f32,
+        body_resonance: f32,
+        body_damping: f32,
+        string_tension: f32,
+        scale_length: f32,
+        capo_fret: u8, // Allow setting capo_fret
+    ) -> Self {
+        // Validate capo_fret to prevent unrealistic values
+        let validated_capo_fret = capo_fret.min(24); // Assuming a maximum of 24 frets
+
+        GuitarConfig {
+            decay,
+            string_damping,
+            body_resonance,
+            body_damping,
+            string_tension,
+            scale_length,
+            capo_fret: validated_capo_fret,
+            name: GuitarType::Custom,
         }
     }
 }
@@ -222,8 +259,10 @@ impl KarplusStrong {
         let mut prev = 0.0;
         for _ in 0..buffer_length {
             let white = random::<f32>() * 2.0 - 1.0;
-            // Lowpass filter the white noise
-            let filtered = config.string_damping * prev + (1.0 - config.string_damping) * white;
+
+            let tension_effect = config.string_tension * white;
+            let filtered =
+                config.string_damping * prev + (1.0 - config.string_damping) * tension_effect;
             buffer.push(filtered);
             prev = filtered;
         }
