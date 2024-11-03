@@ -15,7 +15,7 @@ use crate::{
     time_scrubber::time_scrubber::TimeScrubber,
 };
 use eframe::egui;
-use egui::ScrollArea;
+use egui::{ScrollArea, Vec2};
 use renderer::{render_score, score_info};
 
 use egui_plot::{Line, Plot, PlotPoints};
@@ -323,12 +323,12 @@ impl eframe::App for TabApp {
                         }
                         ui.end_row();
 
-                        ui.label("Scale length:");
+                        ui.label("Scale length [inch]:");
                         if ui
                             .add(
                                 egui::Slider::new(
                                     &mut self.configs.guitar_configs[0].scale_length,
-                                    10.0..=50.0, // Adjust range as needed
+                                    10.0..=50.0,
                                 )
                                 .step_by(0.1),
                             )
@@ -415,81 +415,80 @@ impl eframe::App for TabApp {
             }
         });
 
-        // Window for Chroma Feature Plot
-        egui::Window::new("Chroma Plot").show(ctx, |ui| {
-            ui.heading("Live Chroma Feature Plot");
+        egui::Window::new("Input plot")
+            .fixed_size(Vec2::new(400.0, 400.0))
+            .show(ctx, |ui| {
+                ui.heading("Live Time-Domain Signal Plot");
 
-            // Access the chroma feature histories
-            let input_chroma_hist = self.input_chroma_history.lock().unwrap();
-            let expected_chroma_hist = self.expected_chroma_history.lock().unwrap();
+                // Access the raw signal histories
+                let input_signal_hist = self.input_signal_history.lock().unwrap();
 
-            if !input_chroma_hist.is_empty() && !expected_chroma_hist.is_empty() {
-                // Use the latest chroma features
-                let input_chroma = &input_chroma_hist[input_chroma_hist.len() - 1];
-                let expected_chroma = &expected_chroma_hist[expected_chroma_hist.len() - 1];
+                if !input_signal_hist.is_empty() {
+                    // Use the latest raw signals
+                    let input_signal = &input_signal_hist[input_signal_hist.len() - 1];
 
-                // Create plot points for chroma features
-                let input_points: PlotPoints = input_chroma
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &y)| [i as f64, y as f64])
-                    .collect();
+                    // Create plot points for raw signals
+                    let input_points: PlotPoints = input_signal
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &y)| [i as f64, y as f64])
+                        .collect();
 
-                let expected_points: PlotPoints = expected_chroma
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &y)| [i as f64, y as f64])
-                    .collect();
+                    // Create lines
+                    let input_line = Line::new(input_points).name("Input Signal");
 
-                // Create lines
-                let input_line = Line::new(input_points).name("Input Chroma");
-                let expected_line = Line::new(expected_points).name("Expected Chroma");
+                    // Plot the lines with fixed y-axis limits
+                    Plot::new("time_domain_plot")
+                        .legend(egui_plot::Legend::default())
+                        .view_aspect(2.0) // Adjust aspect ratio as needed
+                        .include_y(-1.1) // Since we normalized per frame
+                        .include_y(1.1)
+                        .show(ui, |plot_ui| {
+                            plot_ui.line(input_line);
+                        });
+                } else {
+                    ui.label("No time-domain data to display yet.");
+                }
 
-                // Plot the lines
-                Plot::new("chroma_plot")
-                    .legend(egui_plot::Legend::default())
-                    .show(ui, |plot_ui| {
-                        plot_ui.line(input_line);
-                        plot_ui.line(expected_line);
-                    });
-            } else {
-                ui.label("No chroma data to display yet.");
-            }
-        });
+                ui.heading("Live Chroma Feature Plot");
 
-        egui::Window::new("Time-Domain Plot").show(ctx, |ui| {
-            ui.heading("Live Time-Domain Signal Plot");
+                // Access the chroma feature histories
+                let input_chroma_hist = self.input_chroma_history.lock().unwrap();
+                let expected_chroma_hist = self.expected_chroma_history.lock().unwrap();
 
-            // Access the raw signal histories
-            let input_signal_hist = self.input_signal_history.lock().unwrap();
+                if !input_chroma_hist.is_empty() && !expected_chroma_hist.is_empty() {
+                    // Use the latest chroma features
+                    let input_chroma = &input_chroma_hist[input_chroma_hist.len() - 1];
+                    let expected_chroma = &expected_chroma_hist[expected_chroma_hist.len() - 1];
 
-            if !input_signal_hist.is_empty() {
-                // Use the latest raw signals
-                let input_signal = &input_signal_hist[input_signal_hist.len() - 1];
+                    // Create plot points for chroma features
+                    let input_points: PlotPoints = input_chroma
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &y)| [i as f64, y as f64])
+                        .collect();
 
-                // Create plot points for raw signals
-                let input_points: PlotPoints = input_signal
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &y)| [i as f64, y as f64])
-                    .collect();
+                    let expected_points: PlotPoints = expected_chroma
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &y)| [i as f64, y as f64])
+                        .collect();
 
-                // Create lines
-                let input_line = Line::new(input_points).name("Input Signal");
+                    // Create lines
+                    let input_line = Line::new(input_points).name("Input Chroma");
+                    let expected_line = Line::new(expected_points).name("Expected Chroma");
 
-                // Plot the lines with fixed y-axis limits
-                Plot::new("time_domain_plot")
-                    .legend(egui_plot::Legend::default())
-                    .view_aspect(2.0) // Adjust aspect ratio as needed
-                    .include_y(-1.1) // Since we normalized per frame
-                    .include_y(1.1)
-                    .show(ui, |plot_ui| {
-                        plot_ui.line(input_line);
-                    });
-            } else {
-                ui.label("No time-domain data to display yet.");
-            }
-        });
+                    // Plot the lines
+                    Plot::new("chroma_plot")
+                        .legend(egui_plot::Legend::default())
+                        .show(ui, |plot_ui| {
+                            plot_ui.line(input_line);
+                            plot_ui.line(expected_line);
+                        });
+                } else {
+                    ui.label("No chroma data to display yet.");
+                }
+            });
 
         // Central panel to display the tabs and other information
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -534,10 +533,6 @@ impl eframe::App for TabApp {
                         * seconds_per_division
                         * score.divisions_per_measure as f32;
 
-                    println!(
-                        "Seconds per division: {}",
-                        self.audio_player.seconds_per_division
-                    );
                     // Play the notes
                     self.audio_player
                         .play_notes_with_config(&notes, self.audio_player.seconds_per_division);
