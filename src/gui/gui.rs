@@ -55,7 +55,6 @@ impl Configs {
                 GuitarConfig::electric(),
                 GuitarConfig::classical(),
             ],
-            // Initialize other fields...
             custom_tempo: 120,
             use_custom_tempo: false,
             file_path: Some("silent.xml".to_owned()),
@@ -81,7 +80,6 @@ pub struct TabApp {
     pub match_result_receiver: Receiver<bool>,
     pub expected_notes: Arc<std::sync::Mutex<Option<Vec<Note>>>>,
     pub is_match: bool,
-    // New fields for accessing chroma and signal feature histories
     pub input_chroma_history: Arc<std::sync::Mutex<Vec<Vec<f32>>>>,
     pub expected_chroma_history: Arc<std::sync::Mutex<Vec<Vec<f32>>>>,
     pub input_signal_history: Arc<std::sync::Mutex<Vec<Vec<f32>>>>,
@@ -103,10 +101,8 @@ impl TabApp {
             configs.dashes_per_division,
         );
 
-        // Initialize the stop flag
         let stop_flag = Arc::new(AtomicBool::new(false));
 
-        // Clone configs to pass to AudioPlayer
         let audio_player_configs = configs.clone();
         let audio_player = AudioPlayer::new(audio_player_configs);
         audio_player.start();
@@ -118,7 +114,6 @@ impl TabApp {
             AudioListener::new(match_result_sender.clone(), expected_notes.clone());
         audio_listener.start();
 
-        // Clone the chroma and signal feature histories before moving audio_listener
         let input_chroma_history = audio_listener.input_chroma_history.clone();
         let expected_chroma_history = audio_listener.expected_chroma_history.clone();
         let input_signal_history = audio_listener.input_signal_history.clone();
@@ -195,203 +190,200 @@ impl TabApp {
 
 impl eframe::App for TabApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Left panel with playback controls
         let mut changed_config = false;
         let mut changed_rendered_score = false;
         egui::SidePanel::left("left_panel").show(ctx, |ui| {
-            ui.heading("Playback Controls");
-
-            if ui.button("Play").clicked() {
-                self.start_playback();
-            }
-
-            if ui.button("Stop").clicked() {
-                self.stop_playback();
-            }
-
-            ui.heading("Settings");
-            {
-                let cfg = &mut self.configs;
-                if ui
-                    .checkbox(&mut cfg.use_custom_tempo, "Custom tempo")
-                    .changed()
-                {
-                    // self.update_audio_player_configs();
-                }
-                if cfg.use_custom_tempo {
+            ui.group(|ui| {
+                ui.heading("Playback controls");
+                ui.horizontal(|ui| {
+                    if ui.button("Play").clicked() {
+                        self.start_playback();
+                    }
+                    if ui.button("Stop").clicked() {
+                        self.stop_playback();
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Volume:");
                     if ui
-                        .add(egui::Slider::new(&mut cfg.custom_tempo, 1..=240))
+                        .add(egui::Slider::new(&mut self.configs.volume, 0.0..=1.0).step_by(0.01))
+                        .changed()
+                    {
+                        changed_config = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Set custom tempo");
+                    ui.checkbox(&mut self.configs.use_custom_tempo, "");
+                });
+                if self.configs.use_custom_tempo {
+                    if ui
+                        .add(egui::Slider::new(&mut self.configs.custom_tempo, 1..=240))
                         .changed()
                     {
                         self.update_audio_player_configs();
                     }
                 }
-            }
-
-            ui.separator();
-            ui.heading("Audio Settings");
-            egui::ComboBox::new("guitar_selection", "Guitar type")
-                .selected_text(format!(
-                    "{}",
-                    self.configs.guitar_configs[self.configs.active_guitar].name
-                ))
-                .show_ui(ui, |ui| {
-                    for (index, guitar) in self.configs.guitar_configs.iter().enumerate() {
-                        // Check if this guitar is currently selected
-                        let checked = index == self.configs.active_guitar;
-                        if ui
-                            .selectable_label(checked, format!("{}", &guitar.name))
-                            .clicked()
-                        {
-                            self.configs.active_guitar = index;
-                            changed_config = true;
-                        }
-                    }
-                });
-
-            if self.configs.active_guitar == 0 {
-                egui::Grid::new("custom_guitar_config")
-                    .num_columns(2)
-                    .show(ui, |ui| {
-                        ui.label("Decay:");
-                        if ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut self.configs.guitar_configs[0].decay,
-                                    0.9..=1.0,
-                                )
-                                .step_by(0.001),
-                            )
-                            .changed()
-                        {
-                            changed_config = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("String damping:");
-                        if ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut self.configs.guitar_configs[0].string_damping,
-                                    0.0..=1.0,
-                                )
-                                .step_by(0.001),
-                            )
-                            .changed()
-                        {
-                            changed_config = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("Body damping:");
-                        if ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut self.configs.guitar_configs[0].body_damping,
-                                    0.0..=1.0,
-                                )
-                                .step_by(0.001),
-                            )
-                            .changed()
-                        {
-                            changed_config = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("Body resonance:");
-                        if ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut self.configs.guitar_configs[0].body_resonance,
-                                    0.0..=500.0,
-                                )
-                                .step_by(0.1),
-                            )
-                            .changed()
-                        {
-                            changed_config = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("String tension:");
-                        if ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut self.configs.guitar_configs[0].string_tension,
-                                    0.0..=1.0,
-                                )
-                                .step_by(0.001),
-                            )
-                            .changed()
-                        {
-                            changed_config = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("Scale length [inch]:");
-                        if ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut self.configs.guitar_configs[0].scale_length,
-                                    10.0..=50.0,
-                                )
-                                .step_by(0.1),
-                            )
-                            .changed()
-                        {
-                            changed_config = true;
-                        }
-                        ui.end_row();
-                    });
-            }
-            ui.label("Capo Fret:");
-            if ui
-                .add(
-                    egui::Slider::new(
-                        &mut self.configs.guitar_configs[self.configs.active_guitar].capo_fret,
-                        0..=24, // Assuming a maximum of 24 frets
-                    )
-                    .text("Fret"),
-                )
-                .changed()
-            {
-                changed_config = true;
-            }
-
-            // Volume Control
-            ui.horizontal(|ui| {
-                ui.label("Volume:");
+                ui.label(format!(
+                    "Total score time: {:.2} seconds",
+                    self.display_metrics.total_score_time
+                ));
+                ui.label("Capo fret:");
                 if ui
-                    .add(egui::Slider::new(&mut self.configs.volume, 0.0..=1.0).step_by(0.01))
+                    .add(
+                        egui::Slider::new(
+                            &mut self.configs.guitar_configs[self.configs.active_guitar].capo_fret,
+                            0..=24,
+                        )
+                        .text("Fret"),
+                    )
                     .changed()
                 {
                     changed_config = true;
                 }
             });
 
-            // Dashes per division
-            ui.horizontal(|ui| {
-                ui.label("Dashes per division:");
-                if ui
-                    .add(egui::Slider::new(
-                        &mut self.configs.dashes_per_division,
-                        3..=8,
+            ui.group(|ui| {
+                ui.heading("Guitar profile");
+                egui::ComboBox::new("guitar_selection", "Guitar type")
+                    .selected_text(format!(
+                        "{}",
+                        self.configs.guitar_configs[self.configs.active_guitar].name
                     ))
-                    .changed()
-                {
-                    changed_rendered_score = true;
+                    .show_ui(ui, |ui| {
+                        for (index, guitar) in self.configs.guitar_configs.iter().enumerate() {
+                            // Check if this guitar is currently selected
+                            let checked = index == self.configs.active_guitar;
+                            if ui
+                                .selectable_label(checked, format!("{}", &guitar.name))
+                                .clicked()
+                            {
+                                self.configs.active_guitar = index;
+                                changed_config = true;
+                            }
+                        }
+                    });
+
+                if self.configs.active_guitar == 0 {
+                    egui::Grid::new("custom_guitar_config")
+                        .num_columns(2)
+                        .show(ui, |ui| {
+                            ui.label("Decay:");
+                            if ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut self.configs.guitar_configs[0].decay,
+                                        0.9..=1.0,
+                                    )
+                                    .step_by(0.001),
+                                )
+                                .changed()
+                            {
+                                changed_config = true;
+                            }
+                            ui.end_row();
+
+                            ui.label("String damping:");
+                            if ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut self.configs.guitar_configs[0].string_damping,
+                                        0.0..=1.0,
+                                    )
+                                    .step_by(0.001),
+                                )
+                                .changed()
+                            {
+                                changed_config = true;
+                            }
+                            ui.end_row();
+
+                            ui.label("Body damping:");
+                            if ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut self.configs.guitar_configs[0].body_damping,
+                                        0.0..=1.0,
+                                    )
+                                    .step_by(0.001),
+                                )
+                                .changed()
+                            {
+                                changed_config = true;
+                            }
+                            ui.end_row();
+
+                            ui.label("Body resonance:");
+                            if ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut self.configs.guitar_configs[0].body_resonance,
+                                        0.0..=500.0,
+                                    )
+                                    .step_by(0.1),
+                                )
+                                .changed()
+                            {
+                                changed_config = true;
+                            }
+                            ui.end_row();
+
+                            ui.label("String tension:");
+                            if ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut self.configs.guitar_configs[0].string_tension,
+                                        0.0..=1.0,
+                                    )
+                                    .step_by(0.001),
+                                )
+                                .changed()
+                            {
+                                changed_config = true;
+                            }
+                            ui.end_row();
+
+                            ui.label("Scale length [inch]:");
+                            if ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut self.configs.guitar_configs[0].scale_length,
+                                        10.0..=50.0,
+                                    )
+                                    .step_by(0.1),
+                                )
+                                .changed()
+                            {
+                                changed_config = true;
+                            }
+                            ui.end_row();
+                        });
                 }
             });
 
-            // Measure per row
-            ui.horizontal(|ui| {
-                ui.label("Measure per row:");
-                if ui
-                    .add(egui::Slider::new(&mut self.configs.measures_per_row, 3..=8))
-                    .changed()
-                {
-                    changed_rendered_score = true;
-                }
+            ui.group(|ui| {
+                ui.heading("Render settings");
+                ui.horizontal(|ui| {
+                    ui.label("Dashes per division:");
+                    if ui
+                        .add(egui::Slider::new(
+                            &mut self.configs.dashes_per_division,
+                            3..=8,
+                        ))
+                        .changed()
+                    {
+                        changed_rendered_score = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Measure per row:");
+                    if ui
+                        .add(egui::Slider::new(&mut self.configs.measures_per_row, 3..=8))
+                        .changed()
+                    {
+                        changed_rendered_score = true;
+                    }
+                });
             });
 
             if changed_rendered_score {
@@ -403,9 +395,6 @@ impl eframe::App for TabApp {
                     ));
                 }
             }
-
-            ui.separator();
-            ui.heading("Score Info");
 
             if let Some(score) = &self.score {
                 let cfg = &self.configs;
@@ -419,13 +408,6 @@ impl eframe::App for TabApp {
                     * seconds_per_division
                     * score.divisions_per_measure as f32;
             }
-
-            ui.label(format!(
-                "Total score time: {:.2} seconds",
-                self.display_metrics.total_score_time
-            ));
-
-            ui.separator();
 
             ui.label("Currently Playing Notes:");
             if let Some(current_notes) = &self.current_notes {
