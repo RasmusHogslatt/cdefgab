@@ -10,6 +10,8 @@ pub struct TimeScrubber {
     pub total_duration: Option<Duration>,
     pub elapsed_since_start: Duration,
     pub seconds_per_division: f32,
+    pub current_division: Option<usize>,
+    pub current_measure: Option<usize>,
 }
 
 impl TimeScrubber {
@@ -29,6 +31,8 @@ impl TimeScrubber {
             total_duration: Some(total_duration),
             elapsed_since_start: Duration::ZERO,
             seconds_per_division,
+            current_division: None,
+            current_measure: None,
         }
     }
 
@@ -55,16 +59,17 @@ impl TimeScrubber {
     pub fn simulate_playback(
         &mut self,
         score: &Score,
-        tx: Sender<Vec<Note>>,
+        tx_notes: Sender<(Vec<Note>, usize, usize)>,
         stop_flag: Arc<AtomicBool>,
     ) {
         self.start();
 
         if let Some(total_duration) = self.total_duration {
+            let total_duration_f32 = total_duration.as_secs_f32();
             let mut last_sent_measure: Option<usize> = None;
             let mut last_sent_division: Option<usize> = None;
 
-            while self.elapsed().as_secs_f32() < total_duration.as_secs_f32()
+            while self.elapsed().as_secs_f32() < total_duration_f32
                 && !stop_flag.load(Ordering::Relaxed)
             {
                 let elapsed = self.elapsed().as_secs_f32();
@@ -74,6 +79,9 @@ impl TimeScrubber {
                     score.measures.len(),
                 );
 
+                self.current_division = Some(current_division.clone());
+                self.current_measure = Some(current_measure.clone());
+
                 if current_measure >= score.measures.len() {
                     break;
                 }
@@ -81,7 +89,12 @@ impl TimeScrubber {
                 if Some(current_measure) != last_sent_measure
                     || Some(current_division) != last_sent_division
                 {
-                    self.send_notes(&score.measures[current_measure], current_division, &tx);
+                    self.send_notes(
+                        &score.measures[current_measure],
+                        current_division,
+                        current_measure,
+                        &tx_notes,
+                    );
 
                     last_sent_measure = Some(current_measure);
                     last_sent_division = Some(current_division);
@@ -106,11 +119,17 @@ impl TimeScrubber {
         (current_measure.min(total_measures - 1), current_division)
     }
 
-    pub fn send_notes(&self, measure: &Measure, current_division: usize, tx: &Sender<Vec<Note>>) {
+    pub fn send_notes(
+        &self,
+        measure: &Measure,
+        current_division: usize,
+        current_measure: usize,
+        tx: &Sender<(Vec<Note>, usize, usize)>,
+    ) {
         let notes_map = &measure.positions[current_division];
         let notes: Vec<Note> = notes_map.into_iter().cloned().collect();
 
-        if tx.send(notes).is_err() {
+        if tx.send((notes, current_division, current_measure)).is_err() {
             println!("Receiver has been dropped. Stopping playback.");
         }
     }

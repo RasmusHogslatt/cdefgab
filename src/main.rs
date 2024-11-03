@@ -1,3 +1,4 @@
+use egui::{Vec2, ViewportBuilder};
 use gui::gui::TabApp;
 
 mod audio_listener;
@@ -8,7 +9,14 @@ mod renderer;
 mod time_scrubber;
 
 fn main() {
-    let native_options = eframe::NativeOptions::default();
+    let native_options = eframe::NativeOptions {
+        viewport: ViewportBuilder {
+            maximized: Some(true),
+            resizable: Some(true),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     let _ = eframe::run_native(
         "Tab App",
         native_options,

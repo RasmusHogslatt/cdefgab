@@ -69,7 +69,7 @@ pub struct TabApp {
     score: Option<Score>,
     tab_text: Option<String>,
     playback_handle: Option<thread::JoinHandle<()>>,
-    notes_receiver: Option<Receiver<Vec<Note>>>,
+    notes_receiver: Option<Receiver<(Vec<Note>, usize, usize)>>, // Notes, current division, current measure
     is_playing: bool,
     stop_flag: Arc<AtomicBool>,
     pub configs: Configs,
@@ -85,6 +85,8 @@ pub struct TabApp {
     pub input_chroma_history: Arc<std::sync::Mutex<Vec<Vec<f32>>>>,
     pub expected_chroma_history: Arc<std::sync::Mutex<Vec<Vec<f32>>>>,
     pub input_signal_history: Arc<std::sync::Mutex<Vec<Vec<f32>>>>,
+    pub current_measure: Option<usize>,
+    pub current_division: Option<usize>,
 }
 
 impl TabApp {
@@ -137,10 +139,11 @@ impl TabApp {
             match_result_receiver,
             expected_notes,
             is_match: false,
-            // Initialize new fields
             input_chroma_history,
             expected_chroma_history,
             input_signal_history,
+            current_measure: None,
+            current_division: None,
         }
     }
 
@@ -150,13 +153,14 @@ impl TabApp {
         }
 
         if let Some(score) = &self.score {
-            let score = score.clone(); // Clone to move into the thread
-            let (tx, rx) = mpsc::channel();
-            self.notes_receiver = Some(rx);
+            let score = score.clone();
+            let (tx_notes, rx_notes) = mpsc::channel();
+            self.notes_receiver = Some(rx_notes);
+
             self.stop_flag.store(false, Ordering::Relaxed);
             let stop_flag = self.stop_flag.clone();
 
-            let tempo: Option<usize> = if self.configs.use_custom_tempo {
+            let tempo = if self.configs.use_custom_tempo {
                 Some(self.configs.custom_tempo)
             } else {
                 Some(score.tempo)
@@ -164,7 +168,7 @@ impl TabApp {
             self.playback_handle = Some(thread::spawn(move || {
                 let mut scrubber = TimeScrubber::new(&score, tempo);
 
-                scrubber.simulate_playback(&score, tx, stop_flag);
+                scrubber.simulate_playback(&score, tx_notes, stop_flag);
             }));
 
             self.is_playing = true;
@@ -413,6 +417,17 @@ impl eframe::App for TabApp {
             if self.is_playing && self.current_notes.is_some() {
                 ui.label(format!("Note Matched: {}", self.is_match));
             }
+            ui.separator();
+            ui.heading("Playback Timing");
+
+            ui.label(format!(
+                "Current Measure: {}",
+                self.current_measure.unwrap_or(0)
+            ));
+            ui.label(format!(
+                "Current Division: {}",
+                self.current_division.unwrap_or(0)
+            ));
         });
 
         egui::Window::new("Input plot")
@@ -510,9 +525,8 @@ impl eframe::App for TabApp {
             }
         });
 
-        // Receive notes from the playback thread without blocking
         if let (Some(receiver), Some(score)) = (&self.notes_receiver, &self.score) {
-            while let Ok(notes) = receiver.try_recv() {
+            while let Ok((notes, division, measure)) = receiver.try_recv() {
                 if !notes.is_empty() {
                     // Update previous and current notes
                     self.previous_notes = self.current_notes.take();
@@ -537,8 +551,8 @@ impl eframe::App for TabApp {
                     self.audio_player
                         .play_notes_with_config(&notes, self.audio_player.seconds_per_division);
                 }
+                println!("Division: {}, Measure: {}", division, measure);
             }
-            // Request repaint to update the UI
             ctx.request_repaint();
         }
 
