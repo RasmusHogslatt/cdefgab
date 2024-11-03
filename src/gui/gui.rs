@@ -197,6 +197,7 @@ impl eframe::App for TabApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Left panel with playback controls
         let mut changed_config = false;
+        let mut changed_rendered_score = false;
         egui::SidePanel::left("left_panel").show(ctx, |ui| {
             ui.heading("Playback Controls");
 
@@ -367,6 +368,41 @@ impl eframe::App for TabApp {
                     changed_config = true;
                 }
             });
+
+            // Dashes per division
+            ui.horizontal(|ui| {
+                ui.label("Dashes per division:");
+                if ui
+                    .add(egui::Slider::new(
+                        &mut self.configs.dashes_per_division,
+                        3..=8,
+                    ))
+                    .changed()
+                {
+                    changed_rendered_score = true;
+                }
+            });
+
+            // Measure per row
+            ui.horizontal(|ui| {
+                ui.label("Measure per row:");
+                if ui
+                    .add(egui::Slider::new(&mut self.configs.measures_per_row, 3..=8))
+                    .changed()
+                {
+                    changed_rendered_score = true;
+                }
+            });
+
+            if changed_rendered_score {
+                if let Some(score) = &self.score {
+                    self.tab_text = Some(render_score(
+                        &score,
+                        self.configs.measures_per_row,
+                        self.configs.dashes_per_division,
+                    ));
+                }
+            }
 
             ui.separator();
             ui.heading("Score Info");
