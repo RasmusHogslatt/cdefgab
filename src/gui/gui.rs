@@ -1,3 +1,5 @@
+// gui.rs
+
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -15,7 +17,7 @@ use crate::{
     time_scrubber::time_scrubber::TimeScrubber,
 };
 use eframe::egui;
-use egui::{ScrollArea, Vec2};
+use egui::{epaint, Margin, ScrollArea, Vec2};
 use renderer::{render_score, score_info};
 
 use egui_plot::{Line, Plot, PlotPoints};
@@ -26,7 +28,7 @@ pub struct Configs {
     pub use_custom_tempo: bool,
     pub file_path: Option<String>,
     pub measures_per_row: usize,
-    pub dashes_per_division: usize,
+    pub dashes_per_division: usize, // This parameter controls visual subdivisions per division
     pub volume: f32,
     pub guitar_configs: Vec<GuitarConfig>,
     pub active_guitar: usize,
@@ -59,7 +61,7 @@ impl Configs {
             use_custom_tempo: false,
             file_path: Some("silent.xml".to_owned()),
             measures_per_row: 4,
-            dashes_per_division: 4,
+            dashes_per_division: 4, // Default value
         }
     }
 }
@@ -185,6 +187,170 @@ impl TabApp {
 
     fn update_audio_player_configs(&mut self) {
         self.audio_player.update_configs(self.configs.clone());
+    }
+    fn render_tab(&self, painter: &egui::Painter, rect: egui::Rect) {
+        // Constants for rendering
+        let num_strings = 6;
+        let string_spacing = 20.0; // pixels between strings
+        let note_spacing = 10.0; // base pixels between dashes
+        let measure_spacing = 10.0; // additional spacing between measures
+        let row_spacing = 50.0; // vertical spacing between rows
+
+        if let Some(score) = &self.score {
+            let total_measures = score.measures.len();
+            let measures_per_row = self.configs.measures_per_row;
+            let total_rows = (total_measures + measures_per_row - 1) / measures_per_row;
+
+            // Start drawing at rect.min
+            let mut y_offset = rect.min.y;
+
+            for row in 0..total_rows {
+                let measures_in_row = if (row + 1) * measures_per_row <= total_measures {
+                    measures_per_row
+                } else {
+                    total_measures % measures_per_row
+                };
+
+                // Calculate the total width of the current row
+                let mut row_width = 0.0;
+                for measure_idx_in_row in 0..measures_in_row {
+                    let measure_idx = row * measures_per_row + measure_idx_in_row;
+                    let measure = &score.measures[measure_idx];
+                    let dashes_per_division = self.configs.dashes_per_division;
+                    let total_divisions = measure.positions.len();
+                    let total_dashes = total_divisions * dashes_per_division;
+                    row_width += total_dashes as f32 * note_spacing + measure_spacing;
+                }
+                // Subtract the extra measure_spacing added after the last measure
+                row_width -= measure_spacing;
+
+                // Draw strings (horizontal lines) for the current row
+                for string_idx in 0..num_strings {
+                    let y = y_offset + string_spacing * (string_idx as f32 + 1.0);
+                    painter.line_segment(
+                        [
+                            egui::pos2(rect.min.x, y),
+                            egui::pos2(rect.min.x + row_width, y),
+                        ],
+                        egui::Stroke::new(1.0, egui::Color32::BLACK),
+                    );
+                }
+
+                // Draw measures
+                let mut x_offset = rect.min.x;
+                for measure_idx_in_row in 0..measures_in_row {
+                    let measure_idx = row * measures_per_row + measure_idx_in_row;
+                    let measure = &score.measures[measure_idx];
+
+                    // Only draw vertical line at the start of the first measure in the row
+                    if measure_idx_in_row == 0 {
+                        painter.line_segment(
+                            [
+                                egui::pos2(x_offset, y_offset + string_spacing),
+                                egui::pos2(
+                                    x_offset,
+                                    y_offset + string_spacing * (num_strings as f32),
+                                ),
+                            ],
+                            egui::Stroke::new(1.0, egui::Color32::BLACK),
+                        );
+                    }
+
+                    // Calculate total dashes per measure
+                    let dashes_per_division = self.configs.dashes_per_division;
+                    let total_divisions = measure.positions.len();
+                    let total_dashes = total_divisions * dashes_per_division;
+
+                    // Draw notes and dashes
+                    for dash_idx in 0..total_dashes {
+                        let x = x_offset + dash_idx as f32 * note_spacing;
+
+                        // Calculate corresponding division and sub-division indices
+                        let division_idx = dash_idx / dashes_per_division;
+
+                        if division_idx < measure.positions.len() {
+                            // For each note in this division
+                            for note in &measure.positions[division_idx] {
+                                if let (Some(string), Some(fret)) = (note.string, note.fret) {
+                                    let string_idx = string - 1;
+                                    let y = y_offset + string_spacing * (string_idx as f32 + 1.0);
+
+                                    // Only draw the note at the first dash of the division
+                                    if dash_idx % dashes_per_division == 0 {
+                                        // Draw the fret number at (x, y)
+                                        let text = egui::RichText::new(format!("{}", fret))
+                                            .color(egui::Color32::BLACK);
+                                        let text = fret.to_string();
+                                        painter.text(
+                                            egui::pos2(x, y),
+                                            egui::Align2::CENTER_CENTER,
+                                            text,
+                                            egui::FontId::monospace(12.0),
+                                            egui::Color32::BLACK,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Move x_offset to the end of the measure
+                    x_offset += total_dashes as f32 * note_spacing;
+
+                    // Always draw vertical line at the end of measure
+                    painter.line_segment(
+                        [
+                            egui::pos2(x_offset, y_offset + string_spacing),
+                            egui::pos2(x_offset, y_offset + string_spacing * (num_strings as f32)),
+                        ],
+                        egui::Stroke::new(1.0, egui::Color32::BLACK),
+                    );
+
+                    x_offset += measure_spacing;
+                }
+
+                y_offset += num_strings as f32 * string_spacing + row_spacing;
+            }
+
+            // Draw the vertical line at the current measure and division
+            if let (Some(current_measure), Some(current_division)) =
+                (self.current_measure, self.current_division)
+            {
+                let row = current_measure / measures_per_row;
+                let measure_idx_in_row = current_measure % measures_per_row;
+
+                let dashes_per_division = self.configs.dashes_per_division;
+
+                // Recalculate x_offset to find the exact position of the current division
+                let mut x_offset = rect.min.x;
+
+                // Add the widths of the previous measures
+                for idx in 0..measure_idx_in_row {
+                    let measure = &score.measures[row * measures_per_row + idx];
+                    let total_divisions = measure.positions.len();
+                    let total_dashes = total_divisions * dashes_per_division;
+                    x_offset += total_dashes as f32 * note_spacing + measure_spacing;
+                }
+
+                // Add the width of the current divisions within the measure
+                let measure = &score.measures[current_measure];
+                let total_divisions = measure.positions.len();
+                let total_dashes = total_divisions * dashes_per_division;
+
+                let x =
+                    x_offset + current_division as f32 * dashes_per_division as f32 * note_spacing;
+
+                let y_start = rect.min.y
+                    + row as f32 * (num_strings as f32 * string_spacing + row_spacing)
+                    + string_spacing;
+                let y_end = y_start + num_strings as f32 * string_spacing - string_spacing;
+
+                painter.line_segment(
+                    [egui::pos2(x, y_start), egui::pos2(x, y_end)],
+                    egui::Stroke::new(2.0, egui::Color32::RED),
+                );
+            }
+        }
     }
 }
 
@@ -368,7 +534,7 @@ impl eframe::App for TabApp {
                     if ui
                         .add(egui::Slider::new(
                             &mut self.configs.dashes_per_division,
-                            3..=8,
+                            1..=8,
                         ))
                         .changed()
                     {
@@ -378,7 +544,7 @@ impl eframe::App for TabApp {
                 ui.horizontal(|ui| {
                     ui.label("Measure per row:");
                     if ui
-                        .add(egui::Slider::new(&mut self.configs.measures_per_row, 3..=8))
+                        .add(egui::Slider::new(&mut self.configs.measures_per_row, 1..=8))
                         .changed()
                     {
                         changed_rendered_score = true;
@@ -533,18 +699,70 @@ impl eframe::App for TabApp {
                         ui.monospace(score_info(&score));
                     });
             }
+
             ui.heading("Tablature");
-            if let Some(tab_text) = &self.tab_text {
-                ScrollArea::vertical()
+            if let Some(score) = &self.score {
+                ScrollArea::both()
                     .id_salt("tab_scroll_area")
                     .show(ui, |ui| {
-                        ui.monospace(tab_text);
+                        // Wrap the content in a Frame with inner margin
+                        egui::Frame::none()
+                            .inner_margin(Margin {
+                                left: 20.0,
+                                right: 20.0, // Add a 20-pixel padding to the right
+                                top: 10.0,
+                                bottom: 0.0,
+                            })
+                            .show(ui, |ui| {
+                                // Determine the desired size based on the score
+                                let num_strings = 6;
+                                let string_spacing = 20.0;
+                                let note_spacing = 10.0; // base spacing
+                                let measure_spacing = 10.0;
+                                let row_spacing = 50.0;
+
+                                let measures_per_row = self.configs.measures_per_row;
+                                let dashes_per_division = self.configs.dashes_per_division;
+                                let total_measures = score.measures.len();
+                                let total_rows =
+                                    (total_measures + measures_per_row - 1) / measures_per_row;
+
+                                // Calculate total width
+                                let total_width = (0..measures_per_row)
+                                    .map(|measure_idx_in_row| {
+                                        if let Some(measure) =
+                                            score.measures.get(measure_idx_in_row)
+                                        {
+                                            let total_divisions = measure.positions.len();
+                                            total_divisions
+                                                * dashes_per_division
+                                                * note_spacing as usize
+                                        } else {
+                                            0
+                                        }
+                                    })
+                                    .sum::<usize>()
+                                    as f32
+                                    + measures_per_row as f32 * measure_spacing;
+
+                                let total_height = total_rows as f32
+                                    * (num_strings as f32 * string_spacing + row_spacing);
+
+                                let desired_size = egui::Vec2::new(total_width, total_height);
+
+                                let (rect, _response) =
+                                    ui.allocate_exact_size(desired_size, egui::Sense::hover());
+                                let painter = ui.painter_at(rect);
+                                self.render_tab(&painter, rect);
+                            });
                     });
             }
         });
 
         if let (Some(receiver), Some(score)) = (&self.notes_receiver, &self.score) {
             while let Ok((notes, division, measure)) = receiver.try_recv() {
+                self.current_division = Some(division);
+                self.current_measure = Some(measure);
                 if !notes.is_empty() {
                     // Update previous and current notes
                     self.previous_notes = self.current_notes.take();

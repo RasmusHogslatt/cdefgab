@@ -1,4 +1,4 @@
-use egui::{Vec2, ViewportBuilder};
+use egui::ViewportBuilder;
 use gui::gui::TabApp;
 
 mod audio_listener;
