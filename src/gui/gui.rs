@@ -195,6 +195,7 @@ impl TabApp {
         let note_spacing = 10.0; // base pixels between dashes
         let measure_spacing = 10.0; // additional spacing between measures
         let row_spacing = 50.0; // vertical spacing between rows
+        let left_padding = 10.0; // Add left padding to the rendering
 
         if let Some(score) = &self.score {
             let total_measures = score.measures.len();
@@ -229,15 +230,15 @@ impl TabApp {
                     let y = y_offset + string_spacing * (string_idx as f32 + 1.0);
                     painter.line_segment(
                         [
-                            egui::pos2(rect.min.x, y),
-                            egui::pos2(rect.min.x + row_width, y),
+                            egui::pos2(rect.min.x + left_padding, y),
+                            egui::pos2(rect.min.x + left_padding + row_width, y),
                         ],
                         egui::Stroke::new(1.0, egui::Color32::BLACK),
                     );
                 }
 
-                // Draw measures
-                let mut x_offset = rect.min.x;
+                // Adjust x_offset to include left_padding
+                let mut x_offset = rect.min.x + left_padding;
                 for measure_idx_in_row in 0..measures_in_row {
                     let measure_idx = row * measures_per_row + measure_idx_in_row;
                     let measure = &score.measures[measure_idx];
@@ -278,12 +279,10 @@ impl TabApp {
                                     // Only draw the note at the first dash of the division
                                     if dash_idx % dashes_per_division == 0 {
                                         // Draw the fret number at (x, y)
-                                        let text = egui::RichText::new(format!("{}", fret))
-                                            .color(egui::Color32::BLACK);
                                         let text = fret.to_string();
                                         painter.text(
                                             egui::pos2(x, y),
-                                            egui::Align2::CENTER_CENTER,
+                                            egui::Align2::LEFT_CENTER,
                                             text,
                                             egui::FontId::monospace(12.0),
                                             egui::Color32::BLACK,
@@ -322,7 +321,7 @@ impl TabApp {
                 let dashes_per_division = self.configs.dashes_per_division;
 
                 // Recalculate x_offset to find the exact position of the current division
-                let mut x_offset = rect.min.x;
+                let mut x_offset = rect.min.x + left_padding;
 
                 // Add the widths of the previous measures
                 for idx in 0..measure_idx_in_row {
