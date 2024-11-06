@@ -150,6 +150,8 @@ pub enum GuitarType {
     Acoustic,
     Classical,
     Electric,
+    Bass,
+    TwelveString,
 }
 
 impl fmt::Display for GuitarType {
@@ -159,6 +161,8 @@ impl fmt::Display for GuitarType {
             GuitarType::Acoustic => write!(f, "Acoustic"),
             GuitarType::Classical => write!(f, "Classical"),
             GuitarType::Electric => write!(f, "Electric"),
+            GuitarType::Bass => write!(f, "Bass"),
+            GuitarType::TwelveString => write!(f, "Twelve string"),
         }
     }
 }
@@ -177,41 +181,67 @@ pub struct GuitarConfig {
 
 impl GuitarConfig {
     pub fn acoustic() -> Self {
-        GuitarConfig {
-            decay: 0.998,
-            string_damping: 0.2,
-            body_resonance: 100.0,
-            body_damping: 0.1,
-            string_tension: 0.7,
-            scale_length: 25.5,
-            capo_fret: 0, // Default: No capo
+        Self {
             name: GuitarType::Acoustic,
+            decay: 0.995,          // Medium sustain typical for acoustic guitars
+            string_damping: 0.4,   // Moderate string damping
+            body_resonance: 150.0, // Prominent body resonance around 150 Hz
+            body_damping: 0.2,     // Low body damping for richer resonance
+            string_tension: 0.8,   // High tension for steel strings
+            scale_length: 25.5,    // Common scale length for acoustic guitars
+            capo_fret: 0,
         }
     }
 
     pub fn electric() -> Self {
-        GuitarConfig {
-            decay: 0.995,
-            string_damping: 0.1,
-            body_resonance: 150.0,
-            body_damping: 0.3,
-            string_tension: 0.8,
-            scale_length: 25.5,
-            capo_fret: 0, // Default: No capo
+        Self {
             name: GuitarType::Electric,
+            decay: 0.999,         // Longer sustain due to pickups and solid body
+            string_damping: 0.1,  // Less string damping
+            body_resonance: 70.0, // Minimal body resonance in solid bodies
+            body_damping: 0.8,    // High body damping
+            string_tension: 0.8,  // Similar tension to acoustic steel strings
+            scale_length: 25.5,   // Common scale length (Fender style)
+            capo_fret: 0,
         }
     }
 
     pub fn classical() -> Self {
-        GuitarConfig {
-            decay: 0.997,
-            string_damping: 0.3,
-            body_resonance: 90.0,
-            body_damping: 0.05,
-            string_tension: 0.6,
-            scale_length: 25.0,
-            capo_fret: 0, // Default: No capo
+        Self {
             name: GuitarType::Classical,
+            decay: 0.990,          // Shorter sustain due to nylon strings
+            string_damping: 0.6,   // Higher string damping
+            body_resonance: 120.0, // Body resonance typical around 120 Hz
+            body_damping: 0.3,     // Moderate body damping
+            string_tension: 0.5,   // Lower tension for nylon strings
+            scale_length: 25.6,    // Standard scale length for classical guitars
+            capo_fret: 0,
+        }
+    }
+
+    pub fn bass_guitar() -> Self {
+        Self {
+            name: GuitarType::Bass,
+            decay: 0.997,        // Long sustain typical for bass guitars
+            string_damping: 0.3, // Less string damping
+            body_resonance: 0.0, // Minimal body resonance
+            body_damping: 0.9,   // High body damping
+            string_tension: 0.9, // Very high string tension
+            scale_length: 34.0,  // Standard long scale length for bass guitars
+            capo_fret: 0,
+        }
+    }
+
+    pub fn twelve_string() -> Self {
+        Self {
+            name: GuitarType::TwelveString,
+            decay: 0.994,          // Slightly shorter sustain due to extra strings
+            string_damping: 0.5,   // Slightly higher string damping
+            body_resonance: 150.0, // Similar to acoustic guitars
+            body_damping: 0.2,     // Low body damping
+            string_tension: 0.9,   // Higher tension due to additional strings
+            scale_length: 25.5,    // Common scale length
+            capo_fret: 0,
         }
     }
 

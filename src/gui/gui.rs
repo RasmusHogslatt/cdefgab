@@ -17,7 +17,7 @@ use crate::{
     time_scrubber::time_scrubber::TimeScrubber,
 };
 use eframe::egui;
-use egui::{epaint, Margin, ScrollArea, Vec2};
+use egui::{Margin, ScrollArea, Vec2};
 use renderer::{render_score, score_info};
 
 use egui_plot::{Line, Plot, PlotPoints};
@@ -56,12 +56,14 @@ impl Configs {
                 GuitarConfig::acoustic(),
                 GuitarConfig::electric(),
                 GuitarConfig::classical(),
+                GuitarConfig::bass_guitar(),
+                GuitarConfig::twelve_string(),
             ],
             custom_tempo: 120,
             use_custom_tempo: false,
-            file_path: Some("silent.xml".to_owned()),
+            file_path: Some("greensleeves.xml".to_owned()),
             measures_per_row: 4,
-            dashes_per_division: 4, // Default value
+            dashes_per_division: 2,
         }
     }
 }
@@ -188,14 +190,15 @@ impl TabApp {
     fn update_audio_player_configs(&mut self) {
         self.audio_player.update_configs(self.configs.clone());
     }
+
     fn render_tab(&self, painter: &egui::Painter, rect: egui::Rect) {
         // Constants for rendering
         let num_strings = 6;
         let string_spacing = 20.0; // pixels between strings
         let note_spacing = 10.0; // base pixels between dashes
-        let measure_spacing = 10.0; // additional spacing between measures
-        let row_spacing = 50.0; // vertical spacing between rows
-        let left_padding = 10.0; // Add left padding to the rendering
+        let measure_spacing = 0.0; // additional spacing between measures
+        let row_spacing = 20.0; // vertical spacing between rows
+        let left_padding = 0.0; // Add left padding to the rendering
 
         if let Some(score) = &self.score {
             let total_measures = score.measures.len();
@@ -284,7 +287,7 @@ impl TabApp {
                                             egui::pos2(x, y),
                                             egui::Align2::LEFT_CENTER,
                                             text,
-                                            egui::FontId::monospace(12.0),
+                                            egui::FontId::monospace(14.0),
                                             egui::Color32::BLACK,
                                         );
                                     }
@@ -330,11 +333,6 @@ impl TabApp {
                     let total_dashes = total_divisions * dashes_per_division;
                     x_offset += total_dashes as f32 * note_spacing + measure_spacing;
                 }
-
-                // Add the width of the current divisions within the measure
-                let measure = &score.measures[current_measure];
-                let total_divisions = measure.positions.len();
-                let total_dashes = total_divisions * dashes_per_division;
 
                 let x =
                     x_offset + current_division as f32 * dashes_per_division as f32 * note_spacing;
