@@ -1,9 +1,12 @@
-use egui::ViewportBuilder;
-use gui::gui::TabApp;
+// main.rs
 
-mod audio_listener;
-mod audio_player;
+use crate::gui::gui::TabApp;
+use egui::ViewportBuilder;
+
+mod audio;
 mod gui;
+mod guitar;
+mod karplus_strong;
 mod music_representation;
 mod renderer;
 mod time_scrubber;

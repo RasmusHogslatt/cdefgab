@@ -1,17 +1,18 @@
+// time_scrubber.rs
+
+use crate::music_representation::{Measure, Note, Score};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::music_representation::musical_structures::{Measure, Note, Score};
-
 pub struct TimeScrubber {
-    pub start_time: Option<Instant>,
-    pub total_duration: Option<Duration>,
-    pub elapsed_since_start: Duration,
-    pub seconds_per_division: f32,
-    pub current_division: Option<usize>,
-    pub current_measure: Option<usize>,
+    start_time: Option<Instant>,
+    total_duration: Option<Duration>,
+    elapsed_since_start: Duration,
+    seconds_per_division: f32,
+    current_division: Option<usize>,
+    current_measure: Option<usize>,
 }
 
 impl TimeScrubber {
@@ -79,8 +80,8 @@ impl TimeScrubber {
                     score.measures.len(),
                 );
 
-                self.current_division = Some(current_division.clone());
-                self.current_measure = Some(current_measure.clone());
+                self.current_division = Some(current_division);
+                self.current_measure = Some(current_measure);
 
                 if current_measure >= score.measures.len() {
                     break;
@@ -101,13 +102,13 @@ impl TimeScrubber {
                 }
             }
         } else {
-            println!("Can't simulate as total_duration is not set.");
+            eprintln!("Can't simulate as total_duration is not set.");
         }
 
         self.stop();
     }
 
-    pub fn calculate_current_time(
+    fn calculate_current_time(
         &self,
         elapsed: f32,
         divisions_per_measure: usize,
@@ -119,7 +120,7 @@ impl TimeScrubber {
         (current_measure.min(total_measures - 1), current_division)
     }
 
-    pub fn send_notes(
+    fn send_notes(
         &self,
         measure: &Measure,
         current_division: usize,
@@ -127,10 +128,10 @@ impl TimeScrubber {
         tx: &Sender<(Vec<Note>, usize, usize)>,
     ) {
         let notes_map = &measure.positions[current_division];
-        let notes: Vec<Note> = notes_map.into_iter().cloned().collect();
+        let notes: Vec<Note> = notes_map.iter().cloned().collect();
 
         if tx.send((notes, current_division, current_measure)).is_err() {
-            println!("Receiver has been dropped. Stopping playback.");
+            eprintln!("Receiver has been dropped. Stopping playback.");
         }
     }
 }

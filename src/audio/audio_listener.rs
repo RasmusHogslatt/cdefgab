@@ -1,9 +1,11 @@
-// audio_listener.rs
+// audio/audio_listener.rs
 
-use crate::music_representation::musical_structures::{calculate_frequency, Note};
+use crate::music_representation::{calculate_frequency, Note};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream};
-use rustfft::{num_complex::Complex, FftPlanner};
+use rustfft::num_complex::Complex;
+use rustfft::FftPlanner;
+
 use std::collections::HashSet;
 use std::sync::{mpsc::Sender, Arc, Mutex};
 
@@ -14,11 +16,11 @@ const CHROMA_BINS: usize = 12;
 const SILENCE_THRESHOLD: f32 = 0.01; // Adjust as needed
 
 pub struct AudioListener {
-    stream: Option<Stream>,
-    match_result_sender: Arc<Sender<bool>>,
-    expected_notes: Arc<Mutex<Option<Vec<Note>>>>,
+    pub stream: Option<Stream>,
+    pub match_result_sender: Arc<Sender<bool>>,
+    pub expected_notes: Arc<Mutex<Option<Vec<Note>>>>,
     pub sample_rate: f32,
-    input_buffer: Arc<Mutex<Vec<f32>>>,
+    pub input_buffer: Arc<Mutex<Vec<f32>>>,
     pub input_chroma_history: Arc<Mutex<Vec<Vec<f32>>>>,
     pub expected_chroma_history: Arc<Mutex<Vec<Vec<f32>>>>,
     pub input_signal_history: Arc<Mutex<Vec<Vec<f32>>>>,
@@ -28,13 +30,13 @@ impl AudioListener {
     pub fn new(
         match_result_sender: Sender<bool>,
         expected_notes: Arc<Mutex<Option<Vec<Note>>>>,
-    ) -> Self {
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         // Initialize the sample rate
         let host = cpal::default_host();
         let device = host
             .default_input_device()
-            .expect("No input device available");
-        let config = device.default_input_config().unwrap();
+            .ok_or("No input device available")?;
+        let config = device.default_input_config()?;
         let sample_rate = config.sample_rate().0 as f32;
 
         // Initialize the input buffer
@@ -47,7 +49,7 @@ impl AudioListener {
         // Initialize raw signal histories
         let input_signal_history = Arc::new(Mutex::new(Vec::new()));
 
-        Self {
+        Ok(Self {
             stream: None,
             match_result_sender: Arc::new(match_result_sender),
             expected_notes,
@@ -56,15 +58,15 @@ impl AudioListener {
             input_chroma_history,
             expected_chroma_history,
             input_signal_history,
-        }
+        })
     }
 
-    pub fn start(&mut self) {
+    pub fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let host = cpal::default_host();
         let device = host
             .default_input_device()
-            .expect("No input device available");
-        let config = device.default_input_config().unwrap();
+            .ok_or("No input device available")?;
+        let config = device.default_input_config()?;
 
         // Clone fields to move into the closure
         let sample_rate = self.sample_rate;
@@ -76,33 +78,35 @@ impl AudioListener {
         let input_signal_history = Arc::clone(&self.input_signal_history);
 
         let stream = match config.sample_format() {
-            SampleFormat::F32 => device
-                .build_input_stream(
-                    &config.into(),
-                    move |data: &[f32], _| {
-                        process_audio_input(
-                            data,
-                            sample_rate,
-                            &match_result_sender,
-                            &expected_notes,
-                            &input_buffer,
-                            &input_chroma_history,
-                            &expected_chroma_history,
-                            &input_signal_history,
-                        );
-                    },
-                    |err| eprintln!("Stream error: {}", err),
-                    None,
-                )
-                .expect("Failed to build input stream"),
-            _ => panic!("Unsupported sample format"),
+            SampleFormat::F32 => device.build_input_stream(
+                &config.into(),
+                move |data: &[f32], _| {
+                    if let Err(e) = process_audio_input(
+                        data,
+                        sample_rate,
+                        &match_result_sender,
+                        &expected_notes,
+                        &input_buffer,
+                        &input_chroma_history,
+                        &expected_chroma_history,
+                        &input_signal_history,
+                    ) {
+                        eprintln!("Error processing audio input: {}", e);
+                    }
+                },
+                |err| eprintln!("Stream error: {}", err),
+                None,
+            )?,
+            _ => return Err("Unsupported sample format".into()),
         };
 
         self.stream = Some(stream);
 
         if let Some(ref stream) = self.stream {
-            stream.play().expect("Failed to start audio stream");
+            stream.play()?;
         }
+
+        Ok(())
     }
 }
 
@@ -115,7 +119,7 @@ fn process_audio_input(
     input_chroma_history: &Arc<Mutex<Vec<Vec<f32>>>>,
     expected_chroma_history: &Arc<Mutex<Vec<Vec<f32>>>>,
     input_signal_history: &Arc<Mutex<Vec<Vec<f32>>>>,
-) {
+) -> Result<(), Box<dyn std::error::Error>> {
     // Append incoming data to the input buffer
     {
         let mut buffer = input_buffer.lock().unwrap();
@@ -123,8 +127,8 @@ fn process_audio_input(
     }
 
     // Define frame and hop sizes
-    const FRAME_SIZE: usize = 2048 * 2; // Adjusted for better performance
-    const HOP_SIZE: usize = 512 * 2; // Overlap of FRAME_SIZE - HOP_SIZE
+    const FRAME_SIZE: usize = 4096;
+    const HOP_SIZE: usize = 1024;
 
     loop {
         let mut buffer = input_buffer.lock().unwrap();
@@ -202,6 +206,8 @@ fn process_audio_input(
         // Send match result
         match_result_sender.send(match_result).ok();
     }
+
+    Ok(())
 }
 
 /// Generates expected chroma features directly from the expected notes.
@@ -226,7 +232,6 @@ fn generate_expected_chroma(expected_notes: &Option<Vec<Note>>) -> Vec<f32> {
         chroma
     }
 }
-
 /// Compares the peaks in the input chroma to the expected chroma peaks.
 /// Returns true if all expected peaks are found in the input chroma.
 fn compare_chroma_peaks(input_chroma: &[f32], expected_chroma: &[f32]) -> bool {
@@ -250,7 +255,6 @@ fn identify_peaks_expected(chroma: &[f32]) -> HashSet<usize> {
         .filter_map(|(i, &value)| if value > 0.0 { Some(i) } else { None })
         .collect()
 }
-
 /// Identifies the top N peaks in the input chroma vector.
 /// Returns a set of pitch class indices corresponding to the peaks.
 fn identify_peaks_input(chroma: &[f32], num_peaks: usize) -> HashSet<usize> {
@@ -271,7 +275,6 @@ fn identify_peaks_input(chroma: &[f32], num_peaks: usize) -> HashSet<usize> {
         .map(|&(i, _)| i)
         .collect()
 }
-
 /// Computes chroma features for a given audio frame.
 fn compute_chroma_features(signal: &[f32], sample_rate: f32) -> Vec<f32> {
     let fft_size = signal.len();
@@ -332,7 +335,6 @@ fn compute_chroma_features(signal: &[f32], sample_rate: f32) -> Vec<f32> {
 
     chroma_smoothed
 }
-
 /// Smooths a chroma vector by averaging each bin with its neighbors.
 fn smooth_chroma(chroma: &[f32]) -> Vec<f32> {
     let mut smoothed = vec![0.0; chroma.len()];
