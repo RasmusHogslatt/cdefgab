@@ -84,6 +84,9 @@ pub struct TabApp {
     input_signal_history: Arc<Mutex<Vec<Vec<f32>>>>,
     current_measure: Option<usize>,
     current_division: Option<usize>,
+    last_division: Option<usize>,
+    matching_threshold: Arc<Mutex<f32>>,
+    silence_threshold: Arc<Mutex<f32>>,
 }
 
 impl TabApp {
@@ -106,9 +109,15 @@ impl TabApp {
         let (match_result_sender, match_result_receiver) = mpsc::channel();
         let expected_notes = Arc::new(Mutex::new(None));
 
-        let mut audio_listener =
-            AudioListener::new(match_result_sender.clone(), expected_notes.clone())
-                .expect("Failed to initialize AudioListener");
+        let matching_threshold = Arc::new(Mutex::new(0.8)); // Default value
+        let silence_threshold = Arc::new(Mutex::new(0.01)); // Default value
+        let mut audio_listener = AudioListener::new(
+            match_result_sender.clone(),
+            expected_notes.clone(),
+            matching_threshold.clone(),
+            silence_threshold.clone(),
+        )
+        .expect("Failed to initialize AudioListener");
         audio_listener
             .start()
             .expect("Failed to start AudioListener");
@@ -138,6 +147,9 @@ impl TabApp {
             input_signal_history,
             current_measure: None,
             current_division: None,
+            last_division: None,
+            matching_threshold,
+            silence_threshold,
         }
     }
 
@@ -434,6 +446,7 @@ impl TabApp {
     fn handle_playback_messages(&mut self) {
         if let (Some(receiver), Some(score)) = (&self.notes_receiver, &self.score) {
             while let Ok((notes, division, measure)) = receiver.try_recv() {
+                self.last_division = self.current_division.clone();
                 self.current_division = Some(division);
                 self.current_measure = Some(measure);
                 if !notes.is_empty() {
@@ -467,7 +480,10 @@ impl TabApp {
 
     fn handle_match_results(&mut self) {
         while let Ok(is_match) = self.match_result_receiver.try_recv() {
-            if self.is_playing && self.current_notes.is_some() {
+            if self.is_playing
+                && self.current_notes.is_some()
+                && self.current_division != self.last_division
+            {
                 self.is_match = is_match;
             } else {
                 self.is_match = false;
@@ -598,6 +614,7 @@ impl eframe::App for TabApp {
             self.ui_playback_controls(ui, &mut changed_config);
             self.ui_guitar_settings(ui, &mut changed_config);
             self.ui_render_settings(ui, &mut changed_rendered_score);
+            self.ui_audio_matching_settings(ui); // Add this line
             self.ui_current_notes(ui);
             self.ui_match_status(ui);
         });
@@ -639,6 +656,35 @@ impl eframe::App for TabApp {
 }
 
 impl TabApp {
+    fn ui_audio_matching_settings(&mut self, ui: &mut egui::Ui) {
+        ui.group(|ui| {
+            ui.heading("Audio Matching Settings");
+
+            // Matching Threshold
+            ui.horizontal(|ui| {
+                ui.label("Matching Threshold:");
+                let mut matching_threshold = *self.matching_threshold.lock().unwrap();
+                if ui
+                    .add(egui::Slider::new(&mut matching_threshold, 0.0..=1.0).step_by(0.01))
+                    .changed()
+                {
+                    *self.matching_threshold.lock().unwrap() = matching_threshold;
+                }
+            });
+
+            // Silence Threshold
+            ui.horizontal(|ui| {
+                ui.label("Silence Threshold:");
+                let mut silence_threshold = *self.silence_threshold.lock().unwrap();
+                if ui
+                    .add(egui::Slider::new(&mut silence_threshold, 0.0..=0.7).step_by(0.001))
+                    .changed()
+                {
+                    *self.silence_threshold.lock().unwrap() = silence_threshold;
+                }
+            });
+        });
+    }
     fn ui_playback_controls(&mut self, ui: &mut egui::Ui, changed_config: &mut bool) {
         ui.group(|ui| {
             ui.heading("Playback Controls");

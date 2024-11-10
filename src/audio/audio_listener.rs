@@ -5,15 +5,10 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream};
 use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 
-use std::collections::HashSet;
-use std::sync::{mpsc::Sender, Arc, Mutex};
-
-// Number of chroma bins
 const CHROMA_BINS: usize = 12;
-
-// Threshold for silence detection
-const SILENCE_THRESHOLD: f32 = 0.01; // Adjust as needed
 
 pub struct AudioListener {
     pub stream: Option<Stream>,
@@ -24,29 +19,29 @@ pub struct AudioListener {
     pub input_chroma_history: Arc<Mutex<Vec<Vec<f32>>>>,
     pub expected_chroma_history: Arc<Mutex<Vec<Vec<f32>>>>,
     pub input_signal_history: Arc<Mutex<Vec<Vec<f32>>>>,
+    pub matching_threshold: Arc<Mutex<f32>>,
+    pub silence_threshold: Arc<Mutex<f32>>,
 }
 
 impl AudioListener {
     pub fn new(
         match_result_sender: Sender<bool>,
         expected_notes: Arc<Mutex<Option<Vec<Note>>>>,
+        matching_threshold: Arc<Mutex<f32>>,
+        silence_threshold: Arc<Mutex<f32>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        // Initialize the sample rate
         let host = cpal::default_host();
         let device = host
             .default_input_device()
             .ok_or("No input device available")?;
+        println!("Using input device: {}", device.name()?);
         let config = device.default_input_config()?;
+
         let sample_rate = config.sample_rate().0 as f32;
 
-        // Initialize the input buffer
         let input_buffer = Arc::new(Mutex::new(Vec::new()));
-
-        // Initialize chroma feature histories
         let input_chroma_history = Arc::new(Mutex::new(Vec::new()));
         let expected_chroma_history = Arc::new(Mutex::new(Vec::new()));
-
-        // Initialize raw signal histories
         let input_signal_history = Arc::new(Mutex::new(Vec::new()));
 
         Ok(Self {
@@ -58,6 +53,8 @@ impl AudioListener {
             input_chroma_history,
             expected_chroma_history,
             input_signal_history,
+            matching_threshold,
+            silence_threshold,
         })
     }
 
@@ -76,6 +73,8 @@ impl AudioListener {
         let input_chroma_history = Arc::clone(&self.input_chroma_history);
         let expected_chroma_history = Arc::clone(&self.expected_chroma_history);
         let input_signal_history = Arc::clone(&self.input_signal_history);
+        let matching_threshold = Arc::clone(&self.matching_threshold);
+        let silence_threshold = Arc::clone(&self.silence_threshold);
 
         let stream = match config.sample_format() {
             SampleFormat::F32 => device.build_input_stream(
@@ -90,6 +89,8 @@ impl AudioListener {
                         &input_chroma_history,
                         &expected_chroma_history,
                         &input_signal_history,
+                        &matching_threshold,
+                        &silence_threshold,
                     ) {
                         eprintln!("Error processing audio input: {}", e);
                     }
@@ -110,6 +111,22 @@ impl AudioListener {
     }
 }
 
+fn normalize_signal(signal: &mut [f32]) {
+    // Find the maximum absolute value in the signal
+    if let Some(max_amplitude) = signal
+        .iter()
+        .map(|x| x.abs())
+        .max_by(|a, b| a.partial_cmp(b).unwrap())
+    {
+        if max_amplitude > 0.0 {
+            // Normalize the signal to be between -1 and 1
+            for sample in signal.iter_mut() {
+                *sample /= max_amplitude;
+            }
+        }
+    }
+}
+
 fn process_audio_input(
     data: &[f32],
     sample_rate: f32,
@@ -119,14 +136,20 @@ fn process_audio_input(
     input_chroma_history: &Arc<Mutex<Vec<Vec<f32>>>>,
     expected_chroma_history: &Arc<Mutex<Vec<Vec<f32>>>>,
     input_signal_history: &Arc<Mutex<Vec<Vec<f32>>>>,
+    matching_threshold: &Arc<Mutex<f32>>,
+    silence_threshold: &Arc<Mutex<f32>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Read thresholds
+    let matching_threshold = *matching_threshold.lock().unwrap();
+    let silence_threshold = *silence_threshold.lock().unwrap();
+
     // Append incoming data to the input buffer
     {
         let mut buffer = input_buffer.lock().unwrap();
         buffer.extend_from_slice(data);
     }
 
-    // Define frame and hop sizes
+    // Frame size and hop size
     const FRAME_SIZE: usize = 4096;
     const HOP_SIZE: usize = 1024;
 
@@ -138,70 +161,88 @@ fn process_audio_input(
         }
 
         // Extract the current frame
-        let input_signal = buffer[..FRAME_SIZE].to_vec();
+        let mut input_signal = buffer[..FRAME_SIZE].to_vec();
+        normalize_signal(&mut input_signal);
 
         // Remove the processed samples, keeping the overlap
         buffer.drain(..HOP_SIZE);
         drop(buffer); // Release the lock
 
-        // Get the expected notes
-        let expected_notes_lock = expected_notes.lock().unwrap();
-        if expected_notes_lock.is_none() {
-            // No expected notes, skip processing
-            continue;
-        }
-        let expected_notes_clone = expected_notes_lock.clone();
-        drop(expected_notes_lock); // Release the lock
+        // Compute RMS energy to check for silence
+        let rms_energy =
+            (input_signal.iter().map(|&x| x * x).sum::<f32>() / input_signal.len() as f32).sqrt();
 
-        // Generate expected chroma features directly from the notes
-        let expected_chroma = generate_expected_chroma(&expected_notes_clone);
-
-        // Normalize input signal per frame
-        let normalized_input_signal = normalize_signal_per_frame(&input_signal);
-
-        // Compute RMS energy of the normalized input signal
-        let rms_energy = normalized_input_signal.iter().map(|x| x * x).sum::<f32>()
-            / normalized_input_signal.len() as f32;
-
-        if rms_energy < SILENCE_THRESHOLD {
+        if rms_energy < silence_threshold {
             // Skip processing this frame
             continue;
         }
 
-        // Extract chroma features from the input signal
-        let input_chroma = compute_chroma_features(&normalized_input_signal, sample_rate);
+        // Apply pre-emphasis filter to boost high frequencies
+        let pre_emphasis = 0.97;
+        let mut emphasized_signal = vec![0.0; input_signal.len()];
+        emphasized_signal[0] = input_signal[0];
+        for i in 1..input_signal.len() {
+            emphasized_signal[i] = input_signal[i] - pre_emphasis * input_signal[i - 1];
+        }
 
-        // Store chroma features in Mutex Vecs sent to GUI
+        // Compute chroma features from the input signal
+        let input_chroma = compute_chroma_features(&emphasized_signal, sample_rate);
+
+        // Retrieve expected notes and generate expected chroma features
+        let expected_chroma = {
+            let expected_notes = expected_notes.lock().unwrap();
+            generate_expected_chroma(&expected_notes)
+        };
+
+        let mut input_chroma = input_chroma.clone();
+        let mut expected_chroma = expected_chroma.clone();
+
+        normalize_chroma(&mut input_chroma);
+        normalize_chroma(&mut expected_chroma);
+
+        // Store the input signal for plotting
+        {
+            let mut signal_history = input_signal_history.lock().unwrap();
+            signal_history.push(input_signal.clone());
+            if signal_history.len() > 100 {
+                signal_history.remove(0);
+            }
+        }
+
+        // Store the normalized input chroma for plotting
         {
             let mut input_chroma_hist = input_chroma_history.lock().unwrap();
-            let mut expected_chroma_hist = expected_chroma_history.lock().unwrap();
-
             input_chroma_hist.push(input_chroma.clone());
-            expected_chroma_hist.push(expected_chroma.clone());
-
-            // Limit history size
-            const MAX_CHROMA_HISTORY: usize = 100;
-            if input_chroma_hist.len() > MAX_CHROMA_HISTORY {
+            if input_chroma_hist.len() > 100 {
                 input_chroma_hist.remove(0);
+            }
+        }
+
+        // Store the normalized expected chroma for plotting
+        {
+            let mut expected_chroma_hist = expected_chroma_history.lock().unwrap();
+            expected_chroma_hist.push(expected_chroma.clone());
+            if expected_chroma_hist.len() > 100 {
                 expected_chroma_hist.remove(0);
             }
         }
 
-        // Store raw signals for time-domain plots
-        {
-            let mut input_signal_hist = input_signal_history.lock().unwrap();
-
-            input_signal_hist.push(normalized_input_signal.clone());
-
-            // Limit history size
-            const MAX_SIGNAL_HISTORY: usize = 100;
-            if input_signal_hist.len() > MAX_SIGNAL_HISTORY {
-                input_signal_hist.remove(0);
-            }
+        // Exaggerate chroma values by raising to a power (optional)
+        let exponent = 1.5;
+        for c in input_chroma.iter_mut() {
+            *c = c.powf(exponent);
+        }
+        for c in expected_chroma.iter_mut() {
+            *c = c.powf(exponent);
         }
 
-        // Perform peak detection and comparison
-        let match_result = compare_chroma_peaks(&input_chroma, &expected_chroma);
+        // Normalize again after exaggeration if necessary
+        normalize_chroma(&mut input_chroma);
+        normalize_chroma(&mut expected_chroma);
+
+        // Perform similarity comparison
+        let match_result =
+            compare_chroma_similarity(&input_chroma, &expected_chroma, matching_threshold);
 
         // Send match result
         match_result_sender.send(match_result).ok();
@@ -210,84 +251,23 @@ fn process_audio_input(
     Ok(())
 }
 
-/// Generates expected chroma features directly from the expected notes.
-fn generate_expected_chroma(expected_notes: &Option<Vec<Note>>) -> Vec<f32> {
-    let mut chroma = vec![0.0; CHROMA_BINS];
-    if let Some(notes) = expected_notes {
-        for note in notes {
-            if let (Some(_string), Some(_fret)) = (note.string, note.fret) {
-                // Don't hardcode scale length
-                let frequency = calculate_frequency(note, 25.5, 0);
-                let midi = freq_to_midi(frequency);
-                let pitch_class = (midi % 12) as usize;
-                chroma[pitch_class] += 1.0;
-            }
-        }
-    }
-    // Normalize the chroma vector
-    let sum: f32 = chroma.iter().sum();
-    if sum > 0.0 {
-        chroma.iter().map(|&c| c / sum).collect()
-    } else {
-        chroma
-    }
-}
-/// Compares the peaks in the input chroma to the expected chroma peaks.
-/// Returns true if all expected peaks are found in the input chroma.
-fn compare_chroma_peaks(input_chroma: &[f32], expected_chroma: &[f32]) -> bool {
-    // Identify peaks in the expected chroma
-    let expected_peaks = identify_peaks_expected(expected_chroma);
-    let num_expected_peaks = expected_peaks.len();
-
-    // Identify peaks in the input chroma
-    let input_peaks = identify_peaks_input(input_chroma, num_expected_peaks);
-
-    // Check if all expected peaks are present in the input peaks
-    expected_peaks.is_subset(&input_peaks)
-}
-
-/// Identifies peaks in the expected chroma vector.
-/// Returns a set of pitch class indices corresponding to the peaks.
-fn identify_peaks_expected(chroma: &[f32]) -> HashSet<usize> {
-    chroma
-        .iter()
-        .enumerate()
-        .filter_map(|(i, &value)| if value > 0.0 { Some(i) } else { None })
-        .collect()
-}
-/// Identifies the top N peaks in the input chroma vector.
-/// Returns a set of pitch class indices corresponding to the peaks.
-fn identify_peaks_input(chroma: &[f32], num_peaks: usize) -> HashSet<usize> {
-    // Collect indices and values, dereferencing the &f32 to f32
-    let mut indices_and_values: Vec<(usize, f32)> = chroma
-        .iter()
-        .enumerate()
-        .map(|(i, &value)| (i, value)) // Dereference &f32 to f32
-        .collect();
-
-    // Sort by value descending
-    indices_and_values.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-    // Take the top num_peaks indices
-    indices_and_values
-        .iter()
-        .take(num_peaks)
-        .map(|&(i, _)| i)
-        .collect()
-}
-/// Computes chroma features for a given audio frame.
 fn compute_chroma_features(signal: &[f32], sample_rate: f32) -> Vec<f32> {
     let fft_size = signal.len();
     let mut planner = FftPlanner::new();
     let fft = planner.plan_fft_forward(fft_size);
-    let mut buffer: Vec<Complex<f32>> =
-        signal.iter().map(|&s| Complex { re: s, im: 0.0 }).collect();
 
-    // Apply pre-emphasis filter to boost high frequencies
-    let pre_emphasis = 0.97;
-    for i in (1..buffer.len()).rev() {
-        buffer[i].re = buffer[i].re - pre_emphasis * buffer[i - 1].re;
-    }
+    // Apply a Hann window to the signal
+    let hann_window: Vec<f32> = (0..fft_size)
+        .map(|i| {
+            0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (fft_size as f32 - 1.0)).cos())
+        })
+        .collect();
+
+    let mut buffer: Vec<Complex<f32>> = signal
+        .iter()
+        .zip(hann_window.iter())
+        .map(|(&s, &w)| Complex { re: s * w, im: 0.0 })
+        .collect();
 
     fft.process(&mut buffer);
 
@@ -316,49 +296,72 @@ fn compute_chroma_features(signal: &[f32], sample_rate: f32) -> Vec<f32> {
             continue; // Adjusted frequency range for guitar
         }
         let midi = freq_to_midi(freq);
-        let pitch_class = (midi % 12) as usize;
-        if pitch_class < CHROMA_BINS {
-            chroma[pitch_class] += mag;
+        for harmonic in 1..=5 {
+            let harmonic_midi = midi + 12.0 * (harmonic - 1) as f32;
+            let pitch_class = (harmonic_midi.round() as usize % 12) as usize;
+            if pitch_class < CHROMA_BINS {
+                // Decrease weight for higher harmonics
+                chroma[pitch_class] += mag / harmonic as f32;
+            }
         }
     }
-
-    // Normalize chroma vector
-    let sum: f32 = chroma.iter().sum();
-    let chroma_normalized = if sum > 0.0 {
-        chroma.iter().map(|&c| c / sum).collect()
-    } else {
-        chroma.clone()
-    };
-
-    // Apply smoothing to chroma vector
-    let chroma_smoothed = smooth_chroma(&chroma_normalized);
-
-    chroma_smoothed
+    chroma
 }
-/// Smooths a chroma vector by averaging each bin with its neighbors.
-fn smooth_chroma(chroma: &[f32]) -> Vec<f32> {
-    let mut smoothed = vec![0.0; chroma.len()];
-    let len = chroma.len();
-    for i in 0..len {
-        let prev = chroma[(i + len - 1) % len];
-        let curr = chroma[i];
-        let next = chroma[(i + 1) % len];
-        smoothed[i] = (prev + curr + next) / 3.0;
+
+fn normalize_chroma(chroma: &mut [f32]) {
+    if let Some(&max_value) = chroma.iter().max_by(|a, b| a.partial_cmp(b).unwrap()) {
+        if max_value > 0.0 {
+            for c in chroma.iter_mut() {
+                *c /= max_value;
+            }
+        }
     }
-    smoothed
 }
 
-/// Converts frequency (Hz) to MIDI note number.
-fn freq_to_midi(freq: f32) -> u8 {
-    (69.0 + 12.0 * (freq / 440.0).log2()).round() as u8
+fn freq_to_midi(freq: f32) -> f32 {
+    69.0 + 12.0 * (freq / 440.0).log2()
 }
 
-/// Normalizes a signal per frame based on its own maximum amplitude.
-fn normalize_signal_per_frame(signal: &[f32]) -> Vec<f32> {
-    let max_amplitude = signal.iter().map(|x| x.abs()).fold(0.0, f32::max);
-    if max_amplitude == 0.0 {
-        vec![0.0; signal.len()]
-    } else {
-        signal.iter().map(|&x| x / max_amplitude).collect()
+fn generate_expected_chroma(expected_notes: &Option<Vec<Note>>) -> Vec<f32> {
+    let mut chroma = vec![0.0; CHROMA_BINS];
+    if let Some(notes) = expected_notes {
+        for note in notes {
+            if let (Some(_string), Some(_fret)) = (note.string, note.fret) {
+                let frequency = calculate_frequency(note, 25.5, 0);
+                for harmonic in 1..=5 {
+                    let harmonic_freq = frequency * harmonic as f32;
+                    let midi = freq_to_midi(harmonic_freq);
+                    let pitch_class = (midi.round() as usize % 12) as usize;
+                    if pitch_class < CHROMA_BINS {
+                        // Decrease weight for higher harmonics
+                        chroma[pitch_class] += 1.0 / harmonic as f32;
+                    }
+                }
+            }
+        }
     }
+    chroma
+}
+
+fn compare_chroma_similarity(
+    input_chroma: &[f32],
+    expected_chroma: &[f32],
+    threshold: f32,
+) -> bool {
+    let dot_product: f32 = input_chroma
+        .iter()
+        .zip(expected_chroma.iter())
+        .map(|(a, b)| a * b)
+        .sum();
+
+    let input_norm: f32 = input_chroma.iter().map(|&x| x * x).sum::<f32>().sqrt();
+    let expected_norm: f32 = expected_chroma.iter().map(|&x| x * x).sum::<f32>().sqrt();
+
+    if input_norm == 0.0 || expected_norm == 0.0 {
+        return false;
+    }
+
+    let similarity = dot_product / (input_norm * expected_norm);
+
+    similarity >= threshold
 }
