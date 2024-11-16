@@ -201,30 +201,24 @@ fn process_audio_input(
         normalize_chroma(&mut expected_chroma);
 
         // Store the input signal for plotting
-        {
-            let mut signal_history = input_signal_history.lock().unwrap();
-            signal_history.push(input_signal.clone());
-            if signal_history.len() > 100 {
-                signal_history.remove(0);
-            }
+        let mut signal_history = input_signal_history.lock().unwrap();
+        signal_history.push(input_signal.clone());
+        if signal_history.len() > 100 {
+            signal_history.remove(0);
         }
 
         // Store the normalized input chroma for plotting
-        {
-            let mut input_chroma_hist = input_chroma_history.lock().unwrap();
-            input_chroma_hist.push(input_chroma.clone());
-            if input_chroma_hist.len() > 100 {
-                input_chroma_hist.remove(0);
-            }
+        let mut input_chroma_hist = input_chroma_history.lock().unwrap();
+        input_chroma_hist.push(input_chroma.clone());
+        if input_chroma_hist.len() > 100 {
+            input_chroma_hist.remove(0);
         }
 
         // Store the normalized expected chroma for plotting
-        {
-            let mut expected_chroma_hist = expected_chroma_history.lock().unwrap();
-            expected_chroma_hist.push(expected_chroma.clone());
-            if expected_chroma_hist.len() > 100 {
-                expected_chroma_hist.remove(0);
-            }
+        let mut expected_chroma_hist = expected_chroma_history.lock().unwrap();
+        expected_chroma_hist.push(expected_chroma.clone());
+        if expected_chroma_hist.len() > 100 {
+            expected_chroma_hist.remove(0);
         }
 
         // Exaggerate chroma values by raising to a power (optional)
