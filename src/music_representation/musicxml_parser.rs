@@ -3,6 +3,7 @@ use roxmltree::{Document, Node};
 
 use std::collections::HashSet;
 use std::io::Read;
+use std::path::Path;
 use std::{collections::HashMap, fs::File};
 
 use super::VoiceState;
@@ -12,8 +13,7 @@ use super::{
 };
 
 impl Score {
-    pub fn parse_from_musicxml(file_path: &str) -> Result<Score, String> {
-        // Read the MusicXML file content
+    pub fn parse_from_musicxml(file_path: &Path) -> Result<Score, String> {
         let mut file = File::open(&file_path).map_err(|e| e.to_string())?;
         let mut xml_content = String::new();
         file.read_to_string(&mut xml_content)

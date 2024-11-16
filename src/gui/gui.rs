@@ -10,19 +10,23 @@ use crate::time_scrubber::time_scrubber::TimeScrubber;
 
 use eframe::egui;
 use egui::{Margin, ScrollArea, Vec2};
+use egui_file::FileDialog;
 use egui_plot::{Line, Plot, PlotPoints};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc::{self, Receiver},
     Arc, Mutex,
 };
-use std::thread;
-
+use std::{env, thread};
+use std::{
+    ffi::OsStr,
+    path::{Path, PathBuf},
+};
 #[derive(Clone)]
 pub struct Configs {
     pub custom_tempo: usize,
     pub use_custom_tempo: bool,
-    pub file_path: Option<String>,
+    pub file_path: Option<PathBuf>, // Changed to PathBuf
     pub measures_per_row: usize,
     pub dashes_per_division: usize,
     pub guitar_configs: Vec<GuitarConfig>,
@@ -56,7 +60,7 @@ impl Configs {
             ],
             custom_tempo: 120,
             use_custom_tempo: false,
-            file_path: Some("greensleeves.xml".to_owned()),
+            file_path: Some(PathBuf::from("greensleeves.xml")), // Default file as PathBuf
             measures_per_row: 4,
             dashes_per_division: 2,
         }
@@ -87,16 +91,20 @@ pub struct TabApp {
     last_division: Option<usize>,
     matching_threshold: Arc<Mutex<f32>>,
     silence_threshold: Arc<Mutex<f32>>,
+    // Add the file dialog state
+    open_file_dialog: Option<FileDialog>,
 }
-
 impl TabApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let configs = Configs::new();
         let display_metrics = DisplayMetrics {
             total_score_time: 0.0,
         };
-        let file_path = configs.file_path.clone().unwrap_or_default();
-        let score = Score::parse_from_musicxml(&file_path).ok();
+        let file_path = configs.file_path.clone();
+        let score = match &file_path {
+            Some(path) => Score::parse_from_musicxml(path).ok(),
+            None => None,
+        };
         let renderer = Renderer::new(configs.measures_per_row, configs.dashes_per_division);
 
         let stop_flag = Arc::new(AtomicBool::new(false));
@@ -150,6 +158,7 @@ impl TabApp {
             last_division: None,
             matching_threshold,
             silence_threshold,
+            open_file_dialog: None, // Initialize file dialog state
         }
     }
 
@@ -614,7 +623,7 @@ impl eframe::App for TabApp {
             self.ui_playback_controls(ui, &mut changed_config);
             self.ui_guitar_settings(ui, &mut changed_config);
             self.ui_render_settings(ui, &mut changed_rendered_score);
-            self.ui_audio_matching_settings(ui); // Add this line
+            self.ui_audio_matching_settings(ui);
             self.ui_current_notes(ui);
             self.ui_match_status(ui);
         });
@@ -641,6 +650,50 @@ impl eframe::App for TabApp {
 
         if changed_config {
             self.update_audio_player_configs();
+        }
+
+        // Handle file dialog
+        if self.open_file_dialog.is_some() {
+            // Create a temporary variable to hold the selected file
+            let selected_file = {
+                // Limit the scope of the mutable borrow
+                let dialog = self.open_file_dialog.as_mut().unwrap();
+                if dialog.show(ctx).selected() {
+                    dialog.path().map(|p| p.to_path_buf())
+                } else {
+                    None
+                }
+            };
+
+            // Now we can safely borrow `self` mutably again
+            if let Some(file) = selected_file {
+                // Close the dialog
+                self.open_file_dialog = None;
+
+                // Stop any existing playback
+                self.stop_playback();
+
+                // Update the configs.file_path
+                self.configs.file_path = Some(file.clone());
+
+                // Reload the score
+                match Score::parse_from_musicxml(&file) {
+                    Ok(new_score) => {
+                        self.score = Some(new_score);
+                        self.update_display_metrics();
+                        // Reset any necessary state
+                        self.current_measure = None;
+                        self.current_division = None;
+                        self.last_division = None;
+                    }
+                    Err(err) => {
+                        // Handle parse error
+                        self.score = None;
+                        // Show error message
+                        eprintln!("Error parsing MusicXML file: {}", err);
+                    }
+                }
+            }
         }
 
         // Check if playback has finished
@@ -694,6 +747,24 @@ impl TabApp {
                 }
                 if ui.button("Stop").clicked() {
                     self.stop_playback();
+                }
+                if ui.button("Open File").clicked() {
+                    // Stop any existing playback
+                    self.stop_playback();
+
+                    // Filter for .xml files
+                    let filter = Box::new({
+                        let ext = Some(OsStr::new("xml"));
+                        move |path: &Path| -> bool { path.extension() == ext }
+                    });
+
+                    // Set the initial directory to the current working directory
+                    let current_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                    let mut dialog = FileDialog::open_file(Some(current_dir))
+                        // .set_directory(current_dir)
+                        .show_files_filter(filter);
+                    dialog.open();
+                    self.open_file_dialog = Some(dialog);
                 }
             });
             ui.horizontal(|ui| {
