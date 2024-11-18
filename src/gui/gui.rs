@@ -1,14 +1,14 @@
-// gui/gui.rs
+// gui.rs
 
 use crate::audio::audio_listener::AudioListener;
 use crate::audio::audio_player::AudioPlayer;
-
 use crate::guitar::guitar::{GuitarConfig, GuitarType};
-use crate::music_representation::{Measure, Note, Score};
+use crate::music_representation::{Measure, Note, Score, Technique};
 use crate::renderer::renderer::{score_info, Renderer};
 use crate::time_scrubber::time_scrubber::TimeScrubber;
 
 use eframe::egui;
+use egui::epaint::{PathStroke, QuadraticBezierShape};
 use egui::{Margin, ScrollArea, Vec2};
 use egui_file::FileDialog;
 use egui_plot::{Line, Plot, PlotPoints};
@@ -22,11 +22,12 @@ use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
 };
+
 #[derive(Clone)]
 pub struct Configs {
     pub custom_tempo: usize,
     pub use_custom_tempo: bool,
-    pub file_path: Option<PathBuf>, // Changed to PathBuf
+    pub file_path: Option<PathBuf>,
     pub measures_per_row: usize,
     pub dashes_per_division: usize,
     pub guitar_configs: Vec<GuitarConfig>,
@@ -60,7 +61,7 @@ impl Configs {
             ],
             custom_tempo: 120,
             use_custom_tempo: false,
-            file_path: Some(PathBuf::from("greensleeves.xml")), // Default file as PathBuf
+            file_path: Some(PathBuf::from("test_music.xml")),
             measures_per_row: 4,
             dashes_per_division: 2,
         }
@@ -91,9 +92,9 @@ pub struct TabApp {
     last_division: Option<usize>,
     matching_threshold: Arc<Mutex<f32>>,
     silence_threshold: Arc<Mutex<f32>>,
-    // Add the file dialog state
     open_file_dialog: Option<FileDialog>,
 }
+
 impl TabApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let configs = Configs::new();
@@ -158,7 +159,7 @@ impl TabApp {
             last_division: None,
             matching_threshold,
             silence_threshold,
-            open_file_dialog: None, // Initialize file dialog state
+            open_file_dialog: None,
         }
     }
 
@@ -268,7 +269,7 @@ impl TabApp {
                         num_strings,
                         string_spacing,
                         note_spacing,
-                        draw_start_line, // Pass the flag
+                        draw_start_line,
                     );
 
                     // Move x_offset to the end of the measure
@@ -355,7 +356,7 @@ impl TabApp {
         num_strings: usize,
         string_spacing: f32,
         note_spacing: f32,
-        draw_start_line: bool, // New parameter
+        draw_start_line: bool,
     ) {
         let dashes_per_division = self.configs.dashes_per_division;
         let total_divisions = measure.positions.len();
@@ -372,7 +373,10 @@ impl TabApp {
             );
         }
 
-        // Draw notes and dashes
+        // Store positions of notes for drawing techniques
+        let mut note_positions: Vec<(egui::Pos2, &Note)> = Vec::new();
+
+        // Draw notes and collect positions
         for division_idx in 0..total_divisions {
             let position_in_dashes = division_idx * dashes_per_division;
             let x = x_offset + position_in_dashes as f32 * note_spacing;
@@ -392,6 +396,54 @@ impl TabApp {
                         egui::FontId::monospace(14.0),
                         egui::Color32::BLACK,
                     );
+
+                    // Store the position and note
+                    note_positions.push((egui::pos2(x, y), note));
+                }
+            }
+        }
+
+        // After drawing notes, draw hammer-on and pull-off arcs
+        for i in 0..note_positions.len() - 1 {
+            let (current_pos, current_note) = note_positions[i];
+            let (next_pos, next_note) = note_positions[i + 1];
+
+            // Only draw if the notes are on the same string and the next note has a technique
+            if current_note.string == next_note.string {
+                match next_note.technique {
+                    Technique::HammerOn | Technique::PullOff => {
+                        // Draw an arc between current_pos and next_pos
+                        let control_point = egui::pos2(
+                            (current_pos.x + next_pos.x) / 2.0,
+                            current_pos.y - 20.0, // Adjust as needed
+                        );
+
+                        // Construct the QuadraticBezierShape
+                        let bezier = QuadraticBezierShape {
+                            points: [current_pos, control_point, next_pos],
+                            closed: false,
+                            fill: egui::Color32::TRANSPARENT,
+                            stroke: PathStroke::new(1.0, egui::Color32::BLACK),
+                        };
+
+                        // Add the shape to the painter
+                        painter.add(egui::Shape::QuadraticBezier(bezier));
+
+                        // Optionally, label the technique
+                        let label = match next_note.technique {
+                            Technique::HammerOn => "H",
+                            Technique::PullOff => "P",
+                            _ => "",
+                        };
+                        painter.text(
+                            egui::pos2(control_point.x, control_point.y - 5.0),
+                            egui::Align2::CENTER_BOTTOM,
+                            label,
+                            egui::FontId::monospace(12.0),
+                            egui::Color32::BLACK,
+                        );
+                    }
+                    _ => {}
                 }
             }
         }
@@ -538,8 +590,8 @@ impl TabApp {
             // Plot the lines with fixed y-axis limits
             Plot::new("time_domain_plot")
                 .legend(egui_plot::Legend::default())
-                .view_aspect(2.0) // Adjust aspect ratio as needed
-                .include_y(-1.1) // Since we normalized per frame
+                .view_aspect(2.0)
+                .include_y(-1.1)
                 .include_y(1.1)
                 .show(ui, |plot_ui| {
                     plot_ui.line(input_line);
@@ -607,6 +659,38 @@ impl TabApp {
                         });
                 });
         }
+    }
+
+    fn calculate_tab_size(&self, score: &Score) -> Vec2 {
+        let num_strings = 6;
+        let string_spacing = 20.0;
+        let note_spacing = 10.0;
+        let measure_spacing = 10.0;
+        let row_spacing = 50.0;
+
+        let measures_per_row = self.configs.measures_per_row;
+        let dashes_per_division = self.configs.dashes_per_division;
+        let total_measures = score.measures.len();
+        let total_rows = (total_measures + measures_per_row - 1) / measures_per_row;
+
+        // Calculate total width
+        let total_width = (0..measures_per_row)
+            .map(|measure_idx_in_row| {
+                if let Some(measure) = score.measures.get(measure_idx_in_row) {
+                    let total_divisions = measure.positions.len();
+                    total_divisions * dashes_per_division * note_spacing as usize
+                } else {
+                    0
+                }
+            })
+            .sum::<usize>() as f32
+            + measures_per_row as f32 * measure_spacing;
+
+        let total_height = total_rows as f32 * (num_strings as f32 * string_spacing + row_spacing);
+
+        // Add padding to the total size (20.0 pixels on each side)
+        let padding = 40.0; // 20.0 pixels on each side
+        Vec2::new(total_width + padding, total_height + padding)
     }
 }
 
@@ -738,6 +822,7 @@ impl TabApp {
             });
         });
     }
+
     fn ui_playback_controls(&mut self, ui: &mut egui::Ui, changed_config: &mut bool) {
         ui.group(|ui| {
             ui.heading("Playback Controls");
@@ -760,9 +845,8 @@ impl TabApp {
 
                     // Set the initial directory to the current working directory
                     let current_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-                    let mut dialog = FileDialog::open_file(Some(current_dir))
-                        // .set_directory(current_dir)
-                        .show_files_filter(filter);
+                    let mut dialog =
+                        FileDialog::open_file(Some(current_dir)).show_files_filter(filter);
                     dialog.open();
                     self.open_file_dialog = Some(dialog);
                 }
@@ -982,37 +1066,5 @@ impl TabApp {
             "Current Division: {}",
             self.current_division.unwrap_or(0)
         ));
-    }
-
-    fn calculate_tab_size(&self, score: &Score) -> Vec2 {
-        let num_strings = 6;
-        let string_spacing = 20.0;
-        let note_spacing = 10.0;
-        let measure_spacing = 10.0;
-        let row_spacing = 50.0;
-
-        let measures_per_row = self.configs.measures_per_row;
-        let dashes_per_division = self.configs.dashes_per_division;
-        let total_measures = score.measures.len();
-        let total_rows = (total_measures + measures_per_row - 1) / measures_per_row;
-
-        // Calculate total width
-        let total_width = (0..measures_per_row)
-            .map(|measure_idx_in_row| {
-                if let Some(measure) = score.measures.get(measure_idx_in_row) {
-                    let total_divisions = measure.positions.len();
-                    total_divisions * dashes_per_division * note_spacing as usize
-                } else {
-                    0
-                }
-            })
-            .sum::<usize>() as f32
-            + measures_per_row as f32 * measure_spacing;
-
-        let total_height = total_rows as f32 * (num_strings as f32 * string_spacing + row_spacing);
-
-        // Add padding to the total size (20.0 pixels on each side)
-        let padding = 40.0; // 20.0 pixels on each side
-        Vec2::new(total_width + padding, total_height + padding)
     }
 }

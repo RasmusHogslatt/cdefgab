@@ -1,4 +1,4 @@
-// music_representation/musical_structures.rs
+// musical_structures.rs
 
 use core::fmt;
 use std::collections::HashSet;
@@ -13,20 +13,28 @@ pub struct Score {
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub enum Technique {
+    None,
+    HammerOn,
+    PullOff,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Note {
     pub string: Option<u8>, // The guitar string number (e.g., 1 to 6)
     pub fret: Option<u8>,   // The fret number for the note on the guitar
     pub duration: u32,      // Duration in divisions
     pub pitch: Option<Pitch>,
+    pub technique: Technique,
 }
 
 impl fmt::Display for Note {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "String:{}, Fret: {}",
-            self.string.unwrap(),
-            self.fret.unwrap()
+            "String: {}, Fret: {}",
+            self.string.unwrap_or(0),
+            self.fret.unwrap_or(0)
         )
     }
 }
@@ -46,13 +54,13 @@ pub struct TimeSignature {
 
 #[derive(Clone, Default, Debug)]
 pub struct Measure {
-    pub positions: Vec<HashSet<Note>>, // Use HashSet to ensure unique notes per position
+    pub positions: Vec<Vec<Note>>, // Notes at each division
 }
 
 impl Measure {
     pub fn new(total_divisions: usize) -> Self {
         Measure {
-            positions: vec![HashSet::new(); total_divisions],
+            positions: vec![Vec::new(); total_divisions],
         }
     }
 }
