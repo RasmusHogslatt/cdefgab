@@ -404,46 +404,48 @@ impl TabApp {
         }
 
         // After drawing notes, draw hammer-on and pull-off arcs
-        for i in 0..note_positions.len() - 1 {
-            let (current_pos, current_note) = note_positions[i];
-            let (next_pos, next_note) = note_positions[i + 1];
+        if note_positions.len() >= 2 {
+            for i in 0..note_positions.len() - 1 {
+                let (current_pos, current_note) = note_positions[i];
+                let (next_pos, next_note) = note_positions[i + 1];
 
-            // Only draw if the notes are on the same string and the next note has a technique
-            if current_note.string == next_note.string {
-                match next_note.technique {
-                    Technique::HammerOn | Technique::PullOff => {
-                        // Draw an arc between current_pos and next_pos
-                        let control_point = egui::pos2(
-                            (current_pos.x + next_pos.x) / 2.0,
-                            current_pos.y - 20.0, // Adjust as needed
-                        );
+                // Only draw if the notes are on the same string and the next note has a technique
+                if current_note.string == next_note.string {
+                    match next_note.technique {
+                        Technique::HammerOn | Technique::PullOff => {
+                            // Draw an arc between current_pos and next_pos
+                            let control_point = egui::pos2(
+                                (current_pos.x + next_pos.x) / 2.0,
+                                current_pos.y - 20.0, // Adjust as needed
+                            );
 
-                        // Construct the QuadraticBezierShape
-                        let bezier = QuadraticBezierShape {
-                            points: [current_pos, control_point, next_pos],
-                            closed: false,
-                            fill: egui::Color32::TRANSPARENT,
-                            stroke: PathStroke::new(1.0, egui::Color32::BLACK),
-                        };
+                            // Construct the QuadraticBezierShape
+                            let bezier = QuadraticBezierShape {
+                                points: [current_pos, control_point, next_pos],
+                                closed: false,
+                                fill: egui::Color32::TRANSPARENT,
+                                stroke: PathStroke::new(1.0, egui::Color32::BLACK),
+                            };
 
-                        // Add the shape to the painter
-                        painter.add(egui::Shape::QuadraticBezier(bezier));
+                            // Add the shape to the painter
+                            painter.add(egui::Shape::QuadraticBezier(bezier));
 
-                        // Optionally, label the technique
-                        let label = match next_note.technique {
-                            Technique::HammerOn => "H",
-                            Technique::PullOff => "P",
-                            _ => "",
-                        };
-                        painter.text(
-                            egui::pos2(control_point.x, control_point.y - 5.0),
-                            egui::Align2::CENTER_BOTTOM,
-                            label,
-                            egui::FontId::monospace(12.0),
-                            egui::Color32::BLACK,
-                        );
+                            // Optionally, label the technique
+                            let label = match next_note.technique {
+                                Technique::HammerOn => "H",
+                                Technique::PullOff => "P",
+                                _ => "",
+                            };
+                            painter.text(
+                                egui::pos2(control_point.x, control_point.y - 5.0),
+                                egui::Align2::CENTER_BOTTOM,
+                                label,
+                                egui::FontId::monospace(12.0),
+                                egui::Color32::BLACK,
+                            );
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
         }
