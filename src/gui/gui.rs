@@ -1,6 +1,6 @@
 // gui.rs
 
-use crate::audio::audio_listener::AudioListener;
+// use crate::audio::audio_listener::AudioListener;
 use crate::audio::audio_player::AudioPlayer;
 use crate::guitar::guitar::{GuitarConfig, GuitarType};
 use crate::music_representation::{Measure, Note, Score, Technique};
@@ -12,6 +12,8 @@ use egui::epaint::{PathStroke, QuadraticBezierShape};
 use egui::{Margin, ScrollArea, Vec2};
 use egui_file::FileDialog;
 use egui_plot::{Line, Plot, PlotPoints};
+use rustfft::num_complex::Complex;
+use rustfft::FftPlanner;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc::{self, Receiver},
@@ -80,19 +82,21 @@ pub struct TabApp {
     previous_notes: Option<Vec<Note>>,
     current_notes: Option<Vec<Note>>,
     audio_player: AudioPlayer,
-    audio_listener: AudioListener,
+    // audio_listener: AudioListener,
     match_result_receiver: Receiver<bool>,
     expected_notes: Arc<Mutex<Option<Vec<Note>>>>,
     is_match: bool,
-    input_chroma_history: Arc<Mutex<Vec<Vec<f32>>>>,
-    expected_chroma_history: Arc<Mutex<Vec<Vec<f32>>>>,
-    input_signal_history: Arc<Mutex<Vec<Vec<f32>>>>,
+    // input_chroma_history: Arc<Mutex<Vec<Vec<f32>>>>,
+    // expected_chroma_history: Arc<Mutex<Vec<Vec<f32>>>>,
+    // input_signal_history: Arc<Mutex<Vec<Vec<f32>>>>,
+    output_signal: Arc<Mutex<Vec<f32>>>,
     current_measure: Option<usize>,
     current_division: Option<usize>,
     last_division: Option<usize>,
     matching_threshold: Arc<Mutex<f32>>,
     silence_threshold: Arc<Mutex<f32>>,
     open_file_dialog: Option<FileDialog>,
+    n: usize,
 }
 
 impl TabApp {
@@ -120,20 +124,7 @@ impl TabApp {
 
         let matching_threshold = Arc::new(Mutex::new(0.8)); // Default value
         let silence_threshold = Arc::new(Mutex::new(0.01)); // Default value
-        let mut audio_listener = AudioListener::new(
-            match_result_sender.clone(),
-            expected_notes.clone(),
-            matching_threshold.clone(),
-            silence_threshold.clone(),
-        )
-        .expect("Failed to initialize AudioListener");
-        audio_listener
-            .start()
-            .expect("Failed to start AudioListener");
-
-        let input_chroma_history = audio_listener.input_chroma_history.clone();
-        let expected_chroma_history = audio_listener.expected_chroma_history.clone();
-        let input_signal_history = audio_listener.input_signal_history.clone();
+        let output_signal_history = audio_player.output_signal.clone();
 
         Self {
             score,
@@ -147,22 +138,120 @@ impl TabApp {
             previous_notes: None,
             current_notes: None,
             audio_player,
-            audio_listener,
+            // audio_listener,
             match_result_receiver,
             expected_notes,
             is_match: false,
-            input_chroma_history,
-            expected_chroma_history,
-            input_signal_history,
             current_measure: None,
             current_division: None,
             last_division: None,
             matching_threshold,
             silence_threshold,
             open_file_dialog: None,
+            output_signal: output_signal_history,
+            n: 2048, // Initial window size
         }
     }
+    fn render_plots(&mut self, ui: &mut egui::Ui) {
+        ui.group(|ui| {
+            ui.heading("Plot Settings");
 
+            ui.horizontal(|ui| {
+                ui.label("Window Size (n):");
+                ui.add(egui::Slider::new(&mut self.n, 256..=16384).step_by(256.0));
+            });
+        });
+
+        let output_signal = self.output_signal.lock().unwrap();
+        let len = output_signal.len();
+
+        if len > 0 {
+            let n = self.n.min(len);
+
+            // Optional: Ensure n is a power of two
+            // let n = 2_usize.pow((n as f64).log2().floor() as u32);
+
+            let start = len - n;
+            let output_slice = &output_signal[start..];
+
+            // Plot Time-Domain Signal
+            let plot_points: PlotPoints =
+                (0..n).map(|i| [i as f64, output_slice[i] as f64]).collect();
+
+            let line = Line::new(plot_points);
+
+            ui.heading("Output Signal (Time Domain)");
+            Plot::new("Output Signal")
+                .view_aspect(2.0)
+                .show(ui, |plot_ui| {
+                    plot_ui.line(line);
+                });
+
+            // Compute FFT
+            let mut planner = FftPlanner::new();
+            let fft = planner.plan_fft_forward(n);
+
+            // Prepare complex input
+            let mut input: Vec<Complex<f32>> = output_slice
+                .iter()
+                .map(|&x| Complex { re: x, im: 0.0 })
+                .collect();
+
+            // Apply Hanning window
+            for (i, sample) in input.iter_mut().enumerate() {
+                let multiplier =
+                    0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / n as f32).cos());
+                sample.re *= multiplier;
+            }
+
+            // Perform FFT in-place
+            fft.process(&mut input);
+
+            // Compute magnitude spectrum in dB
+            let epsilon = 1e-10_f64; // Small value to prevent log(0)
+            let magnitude_spectrum_db: Vec<f64> = input
+                .iter()
+                .take(n / 2) // Only need first half of spectrum
+                .map(|c| {
+                    let mag = c.norm() as f64;
+                    20.0 * (mag + epsilon).log10()
+                })
+                .collect();
+
+            // Prepare frequency axis
+            let sample_rate = self.audio_player.sample_rate;
+            let freq_resolution = sample_rate as f64 / n as f64;
+            let frequencies: Vec<f64> = (0..n / 2).map(|i| i as f64 * freq_resolution).collect();
+
+            // Prepare data points for plotting
+            let spectrum_points_db: PlotPoints = frequencies
+                .iter()
+                .zip(magnitude_spectrum_db.iter())
+                .map(|(&freq, &mag_db)| [freq, mag_db])
+                .collect();
+
+            let spectrum_line_db = Line::new(spectrum_points_db);
+
+            // Plot Frequency-Domain Signal in dB
+            ui.heading("Output Signal (Frequency Domain)");
+            Plot::new("Frequency Spectrum (dB)")
+                .view_aspect(2.0)
+                .allow_scroll(false)
+                .allow_zoom(true)
+                .include_y(-120.0) // Adjust as needed
+                .include_y(0.0)
+                .include_x(0.0)
+                .include_x(sample_rate as f64 / 2.0)
+                .show(ui, |plot_ui| {
+                    plot_ui.line(spectrum_line_db);
+
+                    // plot_ui.set_plot_y_range(-120.0..0.0); // Adjust the y-axis range
+                    // plot_ui.set_plot_x_range(0.0..(sample_rate as f64 / 2.0));
+                });
+        } else {
+            ui.label("No data to display");
+        }
+    }
     fn start_playback(&mut self) {
         if self.is_playing {
             return;
@@ -569,79 +658,6 @@ impl TabApp {
         }
     }
 
-    fn render_plots(&self, ui: &mut egui::Ui) {
-        ui.heading("Live Time-Domain Signal Plot");
-
-        // Access the raw signal histories
-        let input_signal_hist = self.input_signal_history.lock().unwrap();
-
-        if !input_signal_hist.is_empty() {
-            // Use the latest raw signals
-            let input_signal = &input_signal_hist[input_signal_hist.len() - 1];
-
-            // Create plot points for raw signals
-            let input_points: PlotPoints = input_signal
-                .iter()
-                .enumerate()
-                .map(|(i, &y)| [i as f64, y as f64])
-                .collect();
-
-            // Create lines
-            let input_line = Line::new(input_points).name("Input Signal");
-
-            // Plot the lines with fixed y-axis limits
-            Plot::new("time_domain_plot")
-                .legend(egui_plot::Legend::default())
-                .view_aspect(2.0)
-                .include_y(-1.1)
-                .include_y(1.1)
-                .show(ui, |plot_ui| {
-                    plot_ui.line(input_line);
-                });
-        } else {
-            ui.label("No time-domain data to display yet.");
-        }
-
-        ui.heading("Live Chroma Feature Plot");
-
-        // Access the chroma feature histories
-        let input_chroma_hist = self.input_chroma_history.lock().unwrap();
-        let expected_chroma_hist = self.expected_chroma_history.lock().unwrap();
-
-        if !input_chroma_hist.is_empty() && !expected_chroma_hist.is_empty() {
-            // Use the latest chroma features
-            let input_chroma = &input_chroma_hist[input_chroma_hist.len() - 1];
-            let expected_chroma = &expected_chroma_hist[expected_chroma_hist.len() - 1];
-
-            // Create plot points for chroma features
-            let input_points: PlotPoints = input_chroma
-                .iter()
-                .enumerate()
-                .map(|(i, &y)| [i as f64, y as f64])
-                .collect();
-
-            let expected_points: PlotPoints = expected_chroma
-                .iter()
-                .enumerate()
-                .map(|(i, &y)| [i as f64, y as f64])
-                .collect();
-
-            // Create lines
-            let input_line = Line::new(input_points).name("Input Chroma");
-            let expected_line = Line::new(expected_points).name("Expected Chroma");
-
-            // Plot the lines
-            Plot::new("chroma_plot")
-                .legend(egui_plot::Legend::default())
-                .show(ui, |plot_ui| {
-                    plot_ui.line(input_line);
-                    plot_ui.line(expected_line);
-                });
-        } else {
-            ui.label("No chroma data to display yet.");
-        }
-    }
-
     fn render_tab_view(&self, ui: &mut egui::Ui) {
         ui.heading("Tablature");
         if let Some(score) = &self.score {
@@ -715,8 +731,9 @@ impl eframe::App for TabApp {
         });
 
         egui::Window::new("Input plot")
-            .fixed_size(Vec2::new(400.0, 400.0))
+            .fixed_size(Vec2::new(800.0, 800.0))
             .show(ctx, |ui| {
+                ui.label("Add plot here");
                 self.render_plots(ui);
             });
 

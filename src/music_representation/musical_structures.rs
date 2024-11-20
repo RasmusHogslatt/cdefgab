@@ -1,7 +1,6 @@
 // musical_structures.rs
 
 use core::fmt;
-use std::collections::HashSet;
 
 #[derive(Default, Debug, Clone)]
 pub struct Score {

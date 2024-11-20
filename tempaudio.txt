@@ -1,0 +1,73 @@
+
+    // fn render_plots(&self, ui: &mut egui::Ui) {
+    //     ui.heading("Live Time-Domain Signal Plot");
+
+    //     // Access the raw signal histories
+    //     // let input_signal_hist = self.input_signal_history.lock().unwrap();
+
+    //     if !input_signal_hist.is_empty() {
+    //         // Use the latest raw signals
+    //         let input_signal = &input_signal_hist[input_signal_hist.len() - 1];
+
+    //         // Create plot points for raw signals
+    //         let input_points: PlotPoints = input_signal
+    //             .iter()
+    //             .enumerate()
+    //             .map(|(i, &y)| [i as f64, y as f64])
+    //             .collect();
+
+    //         // Create lines
+    //         let input_line = Line::new(input_points).name("Input Signal");
+
+    //         // Plot the lines with fixed y-axis limits
+    //         Plot::new("time_domain_plot")
+    //             .legend(egui_plot::Legend::default())
+    //             .view_aspect(2.0)
+    //             .include_y(-1.1)
+    //             .include_y(1.1)
+    //             .show(ui, |plot_ui| {
+    //                 plot_ui.line(input_line);
+    //             });
+    //     } else {
+    //         ui.label("No time-domain data to display yet.");
+    //     }
+
+    //     ui.heading("Live Chroma Feature Plot");
+
+    //     // Access the chroma feature histories
+    //     let input_chroma_hist = self.input_chroma_history.lock().unwrap();
+    //     let expected_chroma_hist = self.expected_chroma_history.lock().unwrap();
+
+    //     if !input_chroma_hist.is_empty() && !expected_chroma_hist.is_empty() {
+    //         // Use the latest chroma features
+    //         let input_chroma = &input_chroma_hist[input_chroma_hist.len() - 1];
+    //         let expected_chroma = &expected_chroma_hist[expected_chroma_hist.len() - 1];
+
+    //         // Create plot points for chroma features
+    //         let input_points: PlotPoints = input_chroma
+    //             .iter()
+    //             .enumerate()
+    //             .map(|(i, &y)| [i as f64, y as f64])
+    //             .collect();
+
+    //         let expected_points: PlotPoints = expected_chroma
+    //             .iter()
+    //             .enumerate()
+    //             .map(|(i, &y)| [i as f64, y as f64])
+    //             .collect();
+
+    //         // Create lines
+    //         let input_line = Line::new(input_points).name("Input Chroma");
+    //         let expected_line = Line::new(expected_points).name("Expected Chroma");
+
+    //         // Plot the lines
+    //         Plot::new("chroma_plot")
+    //             .legend(egui_plot::Legend::default())
+    //             .show(ui, |plot_ui| {
+    //                 plot_ui.line(input_line);
+    //                 plot_ui.line(expected_line);
+    //             });
+    //     } else {
+    //         ui.label("No chroma data to display yet.");
+    //     }
+    // }

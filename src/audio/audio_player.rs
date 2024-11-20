@@ -10,8 +10,9 @@ use std::sync::{Arc, Mutex};
 pub struct AudioPlayer {
     stream: Option<Stream>,
     active_notes: Arc<Mutex<Vec<KarplusStrong>>>,
-    sample_rate: f32,
+    pub sample_rate: f32,
     configs: Arc<Mutex<GuitarConfig>>,
+    pub output_signal: Arc<Mutex<Vec<f32>>>,
 }
 
 impl AudioPlayer {
@@ -31,6 +32,9 @@ impl AudioPlayer {
         let configs = Arc::new(Mutex::new(configs));
         let configs_clone = Arc::clone(&configs);
 
+        let output_signal: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
+        let output_signal_clone = output_signal.clone();
+
         let stream = match config.sample_format() {
             SampleFormat::F32 => device.build_output_stream(
                 &config.into(),
@@ -41,6 +45,7 @@ impl AudioPlayer {
                         &active_notes_clone,
                         &configs_clone,
                         sample_rate,
+                        &output_signal_clone,
                     ) {
                         eprintln!("Error in audio output stream: {}", e);
                     }
@@ -56,6 +61,7 @@ impl AudioPlayer {
             active_notes,
             sample_rate,
             configs,
+            output_signal,
         })
     }
 
@@ -72,9 +78,12 @@ impl AudioPlayer {
         active_notes: &Arc<Mutex<Vec<KarplusStrong>>>,
         configs: &Arc<Mutex<GuitarConfig>>,
         sample_rate: f32,
+        output_signal: &Arc<Mutex<Vec<f32>>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut active_notes = active_notes.lock().unwrap();
         let configs = configs.lock().unwrap();
+
+        let mut temp_output_signal = Vec::with_capacity(output.len() / channels);
 
         for frame in output.chunks_mut(channels) {
             let mut value = 0.0;
@@ -98,6 +107,20 @@ impl AudioPlayer {
             for sample in frame.iter_mut() {
                 *sample = value;
             }
+
+            temp_output_signal.push(value);
+        }
+
+        // Now push temp_output_signal to output_signal
+
+        let mut output_signal_guard = output_signal.lock().unwrap();
+        output_signal_guard.extend(&temp_output_signal);
+
+        // Limit the size to N samples
+        let n = 44100; // For example, keep last 1 second at 44.1kHz
+        if output_signal_guard.len() > n {
+            let remove_count = output_signal_guard.len() - n;
+            output_signal_guard.drain(0..remove_count);
         }
 
         Ok(())
