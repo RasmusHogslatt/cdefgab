@@ -168,21 +168,32 @@ impl TabApp {
         if len > 0 {
             let n = self.n.min(len);
 
-            // Optional: Ensure n is a power of two
-            // let n = 2_usize.pow((n as f64).log2().floor() as u32);
-
             let start = len - n;
             let output_slice = &output_signal[start..];
 
+            // Normalize the time-domain signal (optional)
+            let max_amplitude = output_slice
+                .iter()
+                .map(|&x| x.abs())
+                .fold(0.0_f32, f32::max);
+            let normalized_output: Vec<f32> = if max_amplitude > 0.0 {
+                output_slice.iter().map(|&x| x / max_amplitude).collect()
+            } else {
+                output_slice.to_vec()
+            };
+
             // Plot Time-Domain Signal
-            let plot_points: PlotPoints =
-                (0..n).map(|i| [i as f64, output_slice[i] as f64]).collect();
+            let plot_points: PlotPoints = (0..n)
+                .map(|i| [i as f64, normalized_output[i] as f64])
+                .collect();
 
             let line = Line::new(plot_points);
 
             ui.heading("Output Signal (Time Domain)");
             Plot::new("Output Signal")
                 .view_aspect(2.0)
+                .include_y(-1.1)
+                .include_y(1.1)
                 .show(ui, |plot_ui| {
                     plot_ui.line(line);
                 });
@@ -192,7 +203,7 @@ impl TabApp {
             let fft = planner.plan_fft_forward(n);
 
             // Prepare complex input
-            let mut input: Vec<Complex<f32>> = output_slice
+            let mut input: Vec<Complex<f32>> = normalized_output
                 .iter()
                 .map(|&x| Complex { re: x, im: 0.0 })
                 .collect();
@@ -213,9 +224,21 @@ impl TabApp {
                 .iter()
                 .take(n / 2) // Only need first half of spectrum
                 .map(|c| {
-                    let mag = c.norm() as f64;
-                    20.0 * (mag + epsilon).log10()
+                    let mag = c.norm() as f64 + epsilon;
+                    20.0 * mag.log10()
                 })
+                .collect();
+
+            // Find the maximum magnitude in dB
+            let max_db = magnitude_spectrum_db
+                .iter()
+                .cloned()
+                .fold(f64::MIN, f64::max);
+
+            // Normalize the magnitude spectrum so that the maximum is at 0 dB
+            let normalized_magnitude_spectrum_db: Vec<f64> = magnitude_spectrum_db
+                .iter()
+                .map(|&db| db - max_db)
                 .collect();
 
             // Prepare frequency axis
@@ -226,7 +249,7 @@ impl TabApp {
             // Prepare data points for plotting
             let spectrum_points_db: PlotPoints = frequencies
                 .iter()
-                .zip(magnitude_spectrum_db.iter())
+                .zip(normalized_magnitude_spectrum_db.iter())
                 .map(|(&freq, &mag_db)| [freq, mag_db])
                 .collect();
 
@@ -234,24 +257,29 @@ impl TabApp {
 
             // Plot Frequency-Domain Signal in dB
             ui.heading("Output Signal (Frequency Domain)");
-            Plot::new("Frequency Spectrum (dB)")
+            Plot::new("Frequency Spectrum (Normalized dB)")
                 .view_aspect(2.0)
                 .allow_scroll(false)
                 .allow_zoom(true)
-                .include_y(-120.0) // Adjust as needed
+                .include_y(-110.0) // Adjust as needed
                 .include_y(0.0)
                 .include_x(0.0)
                 .include_x(sample_rate as f64 / 2.0)
+                .label_formatter(|name, value| {
+                    if !name.is_empty() {
+                        format!("{}: {:.2} Hz, {:.2} dB", name, value.x, value.y)
+                    } else {
+                        format!("{:.2} Hz, {:.2} dB", value.x, value.y)
+                    }
+                })
                 .show(ui, |plot_ui| {
                     plot_ui.line(spectrum_line_db);
-
-                    // plot_ui.set_plot_y_range(-120.0..0.0); // Adjust the y-axis range
-                    // plot_ui.set_plot_x_range(0.0..(sample_rate as f64 / 2.0));
                 });
         } else {
             ui.label("No data to display");
         }
     }
+
     fn start_playback(&mut self) {
         if self.is_playing {
             return;
