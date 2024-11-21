@@ -140,7 +140,6 @@ impl TabApp {
             previous_notes: None,
             current_notes: None,
             audio_player,
-            // audio_listener,
             match_result_receiver,
             expected_notes,
             is_match: false,
@@ -664,6 +663,7 @@ impl TabApp {
                 if !notes.is_empty() {
                     // Update previous and current notes
                     self.previous_notes = self.current_notes.take();
+
                     self.current_notes = Some(notes.clone());
 
                     // Update expected notes for the AudioListener
@@ -785,15 +785,12 @@ impl eframe::App for TabApp {
             self.ui_playback_controls(ui, &mut changed_config);
             self.ui_guitar_settings(ui, &mut changed_config);
             self.ui_render_settings(ui, &mut changed_rendered_score);
-            self.ui_audio_matching_settings(ui);
             self.ui_current_notes(ui);
-            self.ui_match_status(ui);
         });
 
         egui::Window::new("Input plot")
             .fixed_size(Vec2::new(800.0, 800.0))
             .show(ctx, |ui| {
-                ui.label("Add plot here");
                 self.render_plots(ui);
             });
 
@@ -872,36 +869,6 @@ impl eframe::App for TabApp {
 }
 
 impl TabApp {
-    fn ui_audio_matching_settings(&mut self, ui: &mut egui::Ui) {
-        ui.group(|ui| {
-            ui.heading("Audio Matching Settings");
-
-            // Matching Threshold
-            ui.horizontal(|ui| {
-                ui.label("Matching Threshold:");
-                let mut matching_threshold = *self.matching_threshold.lock().unwrap();
-                if ui
-                    .add(egui::Slider::new(&mut matching_threshold, 0.0..=1.0).step_by(0.01))
-                    .changed()
-                {
-                    *self.matching_threshold.lock().unwrap() = matching_threshold;
-                }
-            });
-
-            // Silence Threshold
-            ui.horizontal(|ui| {
-                ui.label("Silence Threshold:");
-                let mut silence_threshold = *self.silence_threshold.lock().unwrap();
-                if ui
-                    .add(egui::Slider::new(&mut silence_threshold, 0.0..=0.7).step_by(0.001))
-                    .changed()
-                {
-                    *self.silence_threshold.lock().unwrap() = silence_threshold;
-                }
-            });
-        });
-    }
-
     fn ui_playback_controls(&mut self, ui: &mut egui::Ui, changed_config: &mut bool) {
         ui.group(|ui| {
             ui.heading("Playback Controls");
@@ -1110,7 +1077,11 @@ impl TabApp {
         if let Some(current_notes) = &self.current_notes {
             for note in current_notes.iter() {
                 if let (Some(string), Some(fret)) = (note.string, note.fret) {
-                    ui.label(format!("String: {}, Fret: {}", string, fret));
+                    ui.label(format!(
+                        "String: {}, Fret: {}",
+                        string,
+                        fret + self.configs.guitar_configs[self.configs.active_guitar].capo_fret
+                    ));
                 }
             }
         }
@@ -1121,29 +1092,13 @@ impl TabApp {
         if let Some(previous_notes) = &self.previous_notes {
             for note in previous_notes.iter() {
                 if let (Some(string), Some(fret)) = (note.string, note.fret) {
-                    ui.label(format!("String: {}, Fret: {}", string, fret));
+                    ui.label(format!(
+                        "String: {}, Fret: {}",
+                        string,
+                        fret + self.configs.guitar_configs[self.configs.active_guitar].capo_fret
+                    ));
                 }
             }
         }
-    }
-
-    fn ui_match_status(&self, ui: &mut egui::Ui) {
-        ui.separator();
-
-        // Display match status
-        if self.is_playing && self.current_notes.is_some() {
-            ui.label(format!("Note Matched: {}", self.is_match));
-        }
-        ui.separator();
-        ui.heading("Playback Timing");
-
-        ui.label(format!(
-            "Current Measure: {}",
-            self.current_measure.unwrap_or(0)
-        ));
-        ui.label(format!(
-            "Current Division: {}",
-            self.current_division.unwrap_or(0)
-        ));
     }
 }
