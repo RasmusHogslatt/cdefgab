@@ -11,9 +11,10 @@ use eframe::egui;
 use egui::epaint::{PathStroke, QuadraticBezierShape};
 use egui::{Margin, ScrollArea, Vec2};
 use egui_file::FileDialog;
-use egui_plot::{Line, Plot, PlotPoints};
+use egui_plot::{Line, Plot, PlotBounds, PlotPoints};
 use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
+
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc::{self, Receiver},
@@ -63,7 +64,7 @@ impl Configs {
             ],
             custom_tempo: 120,
             use_custom_tempo: false,
-            file_path: Some(PathBuf::from("test_music.xml")),
+            file_path: Some(PathBuf::from("silent.xml")),
             measures_per_row: 4,
             dashes_per_division: 2,
         }
@@ -96,7 +97,8 @@ pub struct TabApp {
     matching_threshold: Arc<Mutex<f32>>,
     silence_threshold: Arc<Mutex<f32>>,
     open_file_dialog: Option<FileDialog>,
-    n: usize,
+    plot_length: usize,
+    plot_frequency_range: (usize, usize),
 }
 
 impl TabApp {
@@ -119,7 +121,7 @@ impl TabApp {
             AudioPlayer::new(audio_player_configs).expect("Failed to initialize AudioPlayer");
         audio_player.start().expect("Failed to start AudioPlayer");
 
-        let (match_result_sender, match_result_receiver) = mpsc::channel();
+        let (_match_result_sender, match_result_receiver) = mpsc::channel();
         let expected_notes = Arc::new(Mutex::new(None));
 
         let matching_threshold = Arc::new(Mutex::new(0.8)); // Default value
@@ -149,24 +151,17 @@ impl TabApp {
             silence_threshold,
             open_file_dialog: None,
             output_signal: output_signal_history,
-            n: 2048, // Initial window size
+            plot_length: 2048, // Initial window size
+            plot_frequency_range: (50, 7500),
         }
     }
+
     fn render_plots(&mut self, ui: &mut egui::Ui) {
-        ui.group(|ui| {
-            ui.heading("Plot Settings");
-
-            ui.horizontal(|ui| {
-                ui.label("Window Size (n):");
-                ui.add(egui::Slider::new(&mut self.n, 256..=16384).step_by(256.0));
-            });
-        });
-
         let output_signal = self.output_signal.lock().unwrap();
         let len = output_signal.len();
 
         if len > 0 {
-            let n = self.n.min(len);
+            let n = self.plot_length.min(len);
 
             let start = len - n;
             let output_slice = &output_signal[start..];
@@ -181,22 +176,31 @@ impl TabApp {
             } else {
                 output_slice.to_vec()
             };
-
-            // Plot Time-Domain Signal
-            let plot_points: PlotPoints = (0..n)
-                .map(|i| [i as f64, normalized_output[i] as f64])
-                .collect();
-
-            let line = Line::new(plot_points);
-
-            ui.heading("Output Signal (Time Domain)");
-            Plot::new("Output Signal")
-                .view_aspect(2.0)
-                .include_y(-1.1)
-                .include_y(1.1)
-                .show(ui, |plot_ui| {
-                    plot_ui.line(line);
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Samples:");
+                    ui.add(egui::Slider::new(&mut self.plot_length, 256..=16384).step_by(256.0));
                 });
+
+                // Plot Time-Domain Signal
+                let plot_points: PlotPoints = (0..n)
+                    .map(|i| [i as f64, normalized_output[i] as f64])
+                    .collect();
+
+                let line = Line::new(plot_points);
+
+                Plot::new("Time Domain")
+                    .view_aspect(3.0)
+                    .include_y(-1.1)
+                    .include_y(1.1)
+                    .include_x(0.0)
+                    .include_x(n as f64)
+                    .x_axis_label("Sample Index")
+                    .y_axis_label("Amplitude")
+                    .show(ui, |plot_ui| {
+                        plot_ui.line(line);
+                    });
+            });
 
             // Compute FFT
             let mut planner = FftPlanner::new();
@@ -255,26 +259,54 @@ impl TabApp {
 
             let spectrum_line_db = Line::new(spectrum_points_db);
 
-            // Plot Frequency-Domain Signal in dB
-            ui.heading("Output Signal (Frequency Domain)");
-            Plot::new("Frequency Spectrum (Normalized dB)")
-                .view_aspect(2.0)
-                .allow_scroll(false)
-                .allow_zoom(true)
-                .include_y(-110.0) // Adjust as needed
-                .include_y(0.0)
-                .include_x(0.0)
-                .include_x(sample_rate as f64 / 2.0)
-                .label_formatter(|name, value| {
-                    if !name.is_empty() {
-                        format!("{}: {:.2} Hz, {:.2} dB", name, value.x, value.y)
-                    } else {
-                        format!("{:.2} Hz, {:.2} dB", value.x, value.y)
-                    }
-                })
-                .show(ui, |plot_ui| {
-                    plot_ui.line(spectrum_line_db);
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Frequency range (low, high):");
+                    ui.horizontal(|ui| {
+                        let max_low = self.plot_frequency_range.1 - 50;
+                        let low_max = self.plot_frequency_range.0 + 50;
+                        ui.add(egui::Slider::new(
+                            &mut self.plot_frequency_range.0,
+                            0..=max_low,
+                        ));
+                        ui.add(egui::Slider::new(
+                            &mut self.plot_frequency_range.1,
+                            low_max..=7500,
+                        ));
+                    });
                 });
+
+                // Plot Frequency-Domain Signal in dB
+                Plot::new("Frequency-Amplitude")
+                    .view_aspect(2.0)
+                    .allow_scroll(false)
+                    .allow_zoom(false)
+                    .include_y(0.0)
+                    .include_x(0.0)
+                    .include_x(sample_rate as f64 / 2.0)
+                    .x_axis_label("Frequency [Hz]")
+                    .y_axis_label("Amplitude [dB]")
+                    .label_formatter(|name, value| {
+                        if !name.is_empty() {
+                            format!("{}: {:.2} Hz, {:.2} dB", name, value.x, value.y)
+                        } else {
+                            format!("{:.2} Hz, {:.2} dB", value.x, value.y)
+                        }
+                    })
+                    .show(ui, |plot_ui| {
+                        // Define fixed bounds for the plot
+                        let y_min = -200.0; // Set the lower bound of the y-axis
+                        let y_max = 10.0; // Set the upper bound of the y-axis
+
+                        // Apply the fixed bounds to the plot
+                        plot_ui.set_plot_bounds(PlotBounds::from_min_max(
+                            [self.plot_frequency_range.0 as f64, y_min],
+                            [self.plot_frequency_range.1 as f64, y_max],
+                        ));
+
+                        plot_ui.line(spectrum_line_db);
+                    });
+            });
         } else {
             ui.label("No data to display");
         }
