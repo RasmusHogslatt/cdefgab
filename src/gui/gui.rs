@@ -94,8 +94,6 @@ pub struct TabApp {
     current_measure: Option<usize>,
     current_division: Option<usize>,
     last_division: Option<usize>,
-    matching_threshold: Arc<Mutex<f32>>,
-    silence_threshold: Arc<Mutex<f32>>,
     open_file_dialog: Option<FileDialog>,
     plot_length: usize,
     plot_frequency_range: (usize, usize),
@@ -124,8 +122,6 @@ impl TabApp {
         let (_match_result_sender, match_result_receiver) = mpsc::channel();
         let expected_notes = Arc::new(Mutex::new(None));
 
-        let matching_threshold = Arc::new(Mutex::new(0.8)); // Default value
-        let silence_threshold = Arc::new(Mutex::new(0.01)); // Default value
         let output_signal_history = audio_player.output_signal.clone();
 
         Self {
@@ -146,8 +142,6 @@ impl TabApp {
             current_measure: None,
             current_division: None,
             last_division: None,
-            matching_threshold,
-            silence_threshold,
             open_file_dialog: None,
             output_signal: output_signal_history,
             plot_length: 2048, // Initial window size
