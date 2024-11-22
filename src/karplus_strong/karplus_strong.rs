@@ -9,6 +9,8 @@ pub struct KarplusStrong {
     buffer: Vec<f32>,
     position: usize,
     remaining_samples: usize,
+    config: GuitarConfig,
+    sample_rate: f32,
 }
 
 impl KarplusStrong {
@@ -37,10 +39,12 @@ impl KarplusStrong {
             buffer,
             position: 0,
             remaining_samples,
+            config: config.clone(),
+            sample_rate,
         }
     }
 
-    pub fn next_sample(&mut self, config: &GuitarConfig, sample_rate: f32) -> Option<f32> {
+    pub fn next_sample(&mut self) -> Option<f32> {
         if self.remaining_samples == 0 {
             return None;
         }
@@ -49,18 +53,29 @@ impl KarplusStrong {
         let next_index = (self.position + 1) % self.buffer.len();
         let next_value = self.buffer[next_index];
 
-        let string_sample = config.decay
-            * (config.string_damping * current_value + (1.0 - config.string_damping) * next_value);
+        let string_sample = self.config.decay
+            * (self.config.string_damping * current_value
+                + (1.0 - self.config.string_damping) * next_value);
 
-        let body_freq = 2.0 * PI * config.body_resonance / sample_rate;
+        let body_freq = 2.0 * PI * self.config.body_resonance / self.sample_rate;
 
         let resonated = string_sample * body_freq.sin();
-        let body_sample = resonated * (1.0 - config.body_damping);
+        let body_sample = resonated * (1.0 - self.config.body_damping);
 
         self.buffer[self.position] = string_sample;
         self.position = next_index;
         self.remaining_samples -= 1;
 
         Some(string_sample * 0.7 + body_sample * 0.3)
+    }
+
+    pub fn generate_audio_data(&mut self) -> Vec<f32> {
+        let mut audio_data = Vec::new();
+
+        while let Some(sample) = self.next_sample() {
+            audio_data.push(sample);
+        }
+
+        audio_data
     }
 }

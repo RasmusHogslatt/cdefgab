@@ -70,12 +70,12 @@ impl GuitarConfig {
     pub fn classical() -> Self {
         Self {
             name: GuitarType::Classical,
-            decay: 0.990,          // Shorter sustain due to nylon strings
-            string_damping: 0.6,   // Higher string damping
-            body_resonance: 120.0, // Body resonance typical around 120 Hz
-            body_damping: 0.3,     // Moderate body damping
-            string_tension: 0.5,   // Lower tension for nylon strings
-            scale_length: 25.6,    // Standard scale length for classical guitars
+            decay: 0.990,
+            string_damping: 0.6,
+            body_resonance: 120.0,
+            body_damping: 0.3,
+            string_tension: 0.5,
+            scale_length: 25.6,
             capo_fret: 0,
             volume: 0.5,
         }
@@ -84,12 +84,12 @@ impl GuitarConfig {
     pub fn bass_guitar() -> Self {
         Self {
             name: GuitarType::Bass,
-            decay: 0.997,        // Long sustain typical for bass guitars
-            string_damping: 0.3, // Less string damping
-            body_resonance: 0.0, // Minimal body resonance
-            body_damping: 0.9,   // High body damping
-            string_tension: 0.9, // Very high string tension
-            scale_length: 34.0,  // Standard long scale length for bass guitars
+            decay: 0.997,
+            string_damping: 0.3,
+            body_resonance: 0.0,
+            body_damping: 0.9,
+            string_tension: 0.9,
+            scale_length: 34.0,
             capo_fret: 0,
             volume: 0.5,
         }
@@ -98,12 +98,12 @@ impl GuitarConfig {
     pub fn twelve_string() -> Self {
         Self {
             name: GuitarType::TwelveString,
-            decay: 0.994,          // Slightly shorter sustain due to extra strings
-            string_damping: 0.5,   // Slightly higher string damping
-            body_resonance: 150.0, // Similar to acoustic guitars
-            body_damping: 0.2,     // Low body damping
-            string_tension: 0.9,   // Higher tension due to additional strings
-            scale_length: 25.5,    // Common scale length
+            decay: 0.994,
+            string_damping: 0.5,
+            body_resonance: 150.0,
+            body_damping: 0.2,
+            string_tension: 0.9,
+            scale_length: 25.5,
             capo_fret: 0,
             volume: 0.5,
         }
