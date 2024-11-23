@@ -7,17 +7,14 @@ use std::sync::{Arc, Mutex};
 
 use kira::manager::{AudioManager, AudioManagerSettings};
 
-#[cfg(target_arch = "wasm32")]
-use kira::manager::backend::WebAudioBackend;
-
 use kira::sound::static_sound::{StaticSoundData, StaticSoundSettings};
 use kira::Frame;
 
 pub struct AudioPlayer {
-    #[cfg(not(target_arch = "wasm32"))]
+    // #[cfg(not(target_arch = "wasm32"))]
     manager: Mutex<AudioManager>,
-    #[cfg(target_arch = "wasm32")]
-    manager: Mutex<AudioManager<WebAudioBackend>>,
+    // #[cfg(target_arch = "wasm32")]
+    // manager: Mutex<AudioManager<WebAudioBackend>>,
     pub sample_rate: f32,
     configs: Arc<Mutex<GuitarConfig>>,
     pub output_signal: Arc<Mutex<Vec<f32>>>,
@@ -25,11 +22,11 @@ pub struct AudioPlayer {
 
 impl AudioPlayer {
     pub fn new(configs: GuitarConfig) -> Result<Self, Box<dyn std::error::Error>> {
-        #[cfg(not(target_arch = "wasm32"))]
+        // #[cfg(not(target_arch = "wasm32"))]
         let manager = AudioManager::new(AudioManagerSettings::default())?;
 
-        #[cfg(target_arch = "wasm32")]
-        let manager = AudioManager::<WebAudioBackend>::new(AudioManagerSettings::default())?;
+        // #[cfg(target_arch = "wasm32")]
+        // let manager = AudioManager::<WebAudioBackend>::new(AudioManagerSettings::default())?;
 
         // Since kira doesn't expose the sample rate, we'll use the common sample rate.
         let sample_rate = 44_100.0; // Standard sample rate
