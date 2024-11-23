@@ -12,6 +12,36 @@ use crate::music_representation::utils::{calculate_divisions_per_measure, extrac
 use crate::music_representation::{Measure, Note, Pitch, Score, Technique, VoiceState};
 
 impl Score {
+    pub fn parse_from_musicxml_str(xml_content: &str) -> Result<Score, String> {
+        // Remove the DTD declaration from the XML content
+        let dtd_regex = Regex::new(r"(?s)<!DOCTYPE.*?>").unwrap();
+        let xml_content = dtd_regex.replace(&xml_content, "").to_string();
+
+        // Parse the XML content
+        let doc = Document::parse(&xml_content).map_err(|e| e.to_string())?;
+        let root = doc.root_element();
+
+        // Extract score metadata
+        let (divisions_per_quarter, time_signature, tempo) = extract_score_metadata(&root);
+
+        // Calculate divisions per measure
+        let divisions_per_measure = calculate_divisions_per_measure(
+            time_signature.beats_per_measure,
+            divisions_per_quarter,
+            time_signature.beat_value,
+        );
+
+        // Parse measures
+        let measures = parse_measures(&root, divisions_per_measure)?;
+
+        Ok(Score {
+            measures,
+            time_signature,
+            tempo,
+            divisions_per_quarter,
+            divisions_per_measure: divisions_per_measure as u8,
+        })
+    }
     pub fn parse_from_musicxml<P: AsRef<Path>>(file_path: P) -> Result<Score, String> {
         let mut file = File::open(&file_path).map_err(|e| e.to_string())?;
         let mut xml_content = String::new();

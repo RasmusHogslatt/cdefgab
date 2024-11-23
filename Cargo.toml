@@ -18,6 +18,7 @@ rustfft = "6.2.0"
 serde = { version = "1.0", features = ["derive"] }
 getrandom = { version = "0.2", features = ["js"] }
 rfd = "0.15.1"
+futures = { version = "0.3" }
 
 # Conditional dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

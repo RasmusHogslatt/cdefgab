@@ -15,6 +15,7 @@ use egui_plot::{Line, Plot, PlotBounds, PlotPoints};
 use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
 
+use std::sync::mpsc::{channel, Sender};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc::{self, Receiver},
@@ -25,7 +26,12 @@ use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
 };
-
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
+#[cfg(target_arch = "wasm32")]
+use web_sys::{Event, HtmlInputElement};
 #[derive(Clone)]
 pub struct Configs {
     pub custom_tempo: usize,
@@ -83,13 +89,9 @@ pub struct TabApp {
     previous_notes: Option<Vec<Note>>,
     current_notes: Option<Vec<Note>>,
     audio_player: AudioPlayer,
-    // audio_listener: AudioListener,
     match_result_receiver: Receiver<bool>,
     expected_notes: Arc<Mutex<Option<Vec<Note>>>>,
     is_match: bool,
-    // input_chroma_history: Arc<Mutex<Vec<Vec<f32>>>>,
-    // expected_chroma_history: Arc<Mutex<Vec<Vec<f32>>>>,
-    // input_signal_history: Arc<Mutex<Vec<Vec<f32>>>>,
     output_signal: Arc<Mutex<Vec<f32>>>,
     current_measure: Option<usize>,
     current_division: Option<usize>,
@@ -97,8 +99,25 @@ pub struct TabApp {
     open_file_dialog: Option<FileDialog>,
     plot_length: usize,
     plot_frequency_range: (usize, usize),
+    score_channel: (Sender<Score>, Receiver<Score>),
 }
+#[cfg(not(target_arch = "wasm32"))]
+fn execute<F>(f: F)
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    // Spawn a new thread to run the future
 
+    use futures::executor::block_on;
+    std::thread::spawn(move || {
+        // Run the future to completion
+        block_on(f);
+    });
+}
+#[cfg(target_arch = "wasm32")]
+fn execute<F: std::future::Future<Output = ()> + 'static>(f: F) {
+    wasm_bindgen_futures::spawn_local(f);
+}
 impl TabApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let configs = Configs::new();
@@ -123,7 +142,7 @@ impl TabApp {
         let expected_notes = Arc::new(Mutex::new(None));
 
         let output_signal_history = audio_player.output_signal.clone();
-
+        let score_channel = channel();
         Self {
             score,
             renderer,
@@ -144,8 +163,9 @@ impl TabApp {
             last_division: None,
             open_file_dialog: None,
             output_signal: output_signal_history,
-            plot_length: 2048, // Initial window size
+            plot_length: 2048,
             plot_frequency_range: (50, 7500),
+            score_channel,
         }
     }
 
@@ -775,12 +795,106 @@ impl eframe::App for TabApp {
         let mut changed_config = false;
         let mut changed_rendered_score = false;
 
+        // Check if a new score has been received
+        if let Ok(new_score) = self.score_channel.1.try_recv() {
+            self.score = Some(new_score);
+            // Reset any necessary state
+            self.current_measure = None;
+            self.current_division = None;
+            self.last_division = None;
+            // Any other state resets
+        }
+
         egui::SidePanel::left("left_panel").show(ctx, |ui| {
             self.ui_playback_controls(ui, &mut changed_config);
             self.ui_guitar_settings(ui, &mut changed_config);
             self.ui_render_settings(ui, &mut changed_rendered_score);
             self.ui_current_notes(ui);
+            if ui.button("Open File").clicked() {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let sender = self.score_channel.0.clone();
+                    let task = rfd::AsyncFileDialog::new()
+                        .add_filter("MusicXML", &["xml"])
+                        .pick_file();
+                    let ctx = ui.ctx().clone();
+
+                    execute(async move {
+                        if let Some(file) = task.await {
+                            let data = file.read().await;
+                            let xml_string = String::from_utf8_lossy(&data).to_string();
+
+                            if let Ok(new_score) = Score::parse_from_musicxml_str(&xml_string) {
+                                let _ = sender.send(new_score);
+                            }
+                        }
+                        ctx.request_repaint();
+                    });
+                }
+
+                #[cfg(target_arch = "wasm32")]
+                {
+                    use wasm_bindgen::prelude::*;
+                    use wasm_bindgen::JsCast;
+                    use web_sys::{Event, HtmlInputElement};
+
+                    let document = web_sys::window().unwrap().document().unwrap();
+                    let input = document.create_element("input").unwrap();
+                    input.set_attribute("type", "file").unwrap();
+                    input.set_attribute("accept", ".xml").unwrap();
+                    input.set_attribute("style", "display: none;").unwrap();
+                    let input: HtmlInputElement = input.dyn_into().unwrap();
+
+                    let sender = self.score_channel.0.clone();
+                    let ctx = ui.ctx().clone();
+
+                    let closure = Closure::wrap(Box::new(move |event: Event| {
+                        let input: HtmlInputElement = event.target().unwrap().dyn_into().unwrap();
+                        if let Some(files) = input.files() {
+                            if let Some(file) = files.get(0) {
+                                let file_reader = web_sys::FileReader::new().unwrap();
+                                let fr_c = file_reader.clone();
+                                let sender_clone = sender.clone(); // Clone sender here
+                                let ctx_clone = ctx.clone(); // Clone ctx if needed in inner closure
+                                let onloadend = Closure::wrap(Box::new(move |_event: Event| {
+                                    let result = fr_c.result().unwrap();
+                                    let array = js_sys::Uint8Array::new(&result);
+                                    let data = array.to_vec();
+                                    let xml_string = String::from_utf8_lossy(&data).to_string();
+
+                                    if let Ok(new_score) =
+                                        Score::parse_from_musicxml_str(&xml_string)
+                                    {
+                                        let _ = sender_clone.send(new_score);
+                                    }
+                                    ctx_clone.request_repaint();
+                                })
+                                    as Box<dyn FnMut(_)>);
+
+                                file_reader.set_onloadend(Some(onloadend.as_ref().unchecked_ref()));
+                                file_reader.read_as_array_buffer(&file).unwrap();
+                                onloadend.forget();
+                            }
+                        }
+                    }) as Box<dyn FnMut(_)>);
+
+                    input.set_onchange(Some(closure.as_ref().unchecked_ref()));
+                    closure.forget();
+
+                    // Add the input to the DOM and trigger the click
+                    document.body().unwrap().append_child(&input).unwrap();
+                    input.click();
+                }
+            }
         });
+        if let Ok(new_score) = self.score_channel.1.try_recv() {
+            self.score = Some(new_score);
+            self.stop_playback(); // If you have a method to stop playback
+            self.current_measure = None;
+            self.current_division = None;
+            self.last_division = None;
+            // Reset other relevant state variables
+        }
 
         egui::Window::new("Input plot")
             .fixed_size(Vec2::new(800.0, 800.0))
@@ -806,49 +920,49 @@ impl eframe::App for TabApp {
             self.update_audio_player_configs();
         }
 
-        // Handle file dialog
-        if self.open_file_dialog.is_some() {
-            // Create a temporary variable to hold the selected file
-            let selected_file = {
-                // Limit the scope of the mutable borrow
-                let dialog = self.open_file_dialog.as_mut().unwrap();
-                if dialog.show(ctx).selected() {
-                    dialog.path().map(|p| p.to_path_buf())
-                } else {
-                    None
-                }
-            };
+        // // Handle file dialog
+        // if self.open_file_dialog.is_some() {
+        //     // Create a temporary variable to hold the selected file
+        //     let selected_file = {
+        //         // Limit the scope of the mutable borrow
+        //         let dialog = self.open_file_dialog.as_mut().unwrap();
+        //         if dialog.show(ctx).selected() {
+        //             dialog.path().map(|p| p.to_path_buf())
+        //         } else {
+        //             None
+        //         }
+        //     };
 
-            // Now we can safely borrow `self` mutably again
-            if let Some(file) = selected_file {
-                // Close the dialog
-                self.open_file_dialog = None;
+        //     // Now we can safely borrow `self` mutably again
+        //     if let Some(file) = selected_file {
+        //         // Close the dialog
+        //         self.open_file_dialog = None;
 
-                // Stop any existing playback
-                self.stop_playback();
+        //         // Stop any existing playback
+        //         self.stop_playback();
 
-                // Update the configs.file_path
-                self.configs.file_path = Some(file.clone());
+        //         // Update the configs.file_path
+        //         self.configs.file_path = Some(file.clone());
 
-                // Reload the score
-                match Score::parse_from_musicxml(&file) {
-                    Ok(new_score) => {
-                        self.score = Some(new_score);
-                        self.update_display_metrics();
-                        // Reset any necessary state
-                        self.current_measure = None;
-                        self.current_division = None;
-                        self.last_division = None;
-                    }
-                    Err(err) => {
-                        // Handle parse error
-                        self.score = None;
-                        // Show error message
-                        eprintln!("Error parsing MusicXML file: {}", err);
-                    }
-                }
-            }
-        }
+        //         // Reload the score
+        //         match Score::parse_from_musicxml(&file) {
+        //             Ok(new_score) => {
+        //                 self.score = Some(new_score);
+        //                 self.update_display_metrics();
+        //                 // Reset any necessary state
+        //                 self.current_measure = None;
+        //                 self.current_division = None;
+        //                 self.last_division = None;
+        //             }
+        //             Err(err) => {
+        //                 // Handle parse error
+        //                 self.score = None;
+        //                 // Show error message
+        //                 eprintln!("Error parsing MusicXML file: {}", err);
+        //             }
+        //         }
+        //     }
+        // }
 
         // Check if playback has finished
         if self.is_playing && self.stop_flag.load(Ordering::Relaxed) {
