@@ -5,23 +5,16 @@ use crate::audio::audio_player::AudioPlayer;
 use crate::guitar::guitar::{GuitarConfig, GuitarType};
 use crate::music_representation::{Measure, Note, Score, Technique};
 use crate::renderer::renderer::{score_info, Renderer};
-use crate::time_scrubber::time_scrubber::TimeScrubber;
 
 use eframe::egui;
 use egui::epaint::{PathStroke, QuadraticBezierShape};
 use egui::{Margin, ScrollArea, Vec2};
-use egui_plot::{Line, Plot, PlotBounds, PlotPoints};
-use rustfft::num_complex::Complex;
-use rustfft::FftPlanner;
+use instant::Instant;
 
 use std::path::PathBuf;
+use std::sync::mpsc::Receiver;
 use std::sync::mpsc::{channel, Sender};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    mpsc::{self, Receiver},
-    Arc, Mutex,
-};
-use std::thread;
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
@@ -76,25 +69,26 @@ impl Configs {
 pub struct TabApp {
     score: Option<Score>,
     renderer: Renderer,
-    playback_handle: Option<thread::JoinHandle<()>>,
-    notes_receiver: Option<Receiver<(Vec<Note>, usize, usize)>>, // Notes, current division, current measure
     is_playing: bool,
-    stop_flag: Arc<AtomicBool>,
     configs: Configs,
     display_metrics: DisplayMetrics,
     previous_notes: Option<Vec<Note>>,
     current_notes: Option<Vec<Note>>,
     audio_player: AudioPlayer,
-    match_result_receiver: Receiver<bool>,
-    expected_notes: Arc<Mutex<Option<Vec<Note>>>>,
     is_match: bool,
-    output_signal: Arc<Mutex<Vec<f32>>>,
     current_measure: Option<usize>,
     current_division: Option<usize>,
     last_division: Option<usize>,
     plot_length: usize,
     plot_frequency_range: (usize, usize),
     score_channel: (Sender<Score>, Receiver<Score>),
+    playback_start_time: Option<Instant>,
+    current_time: f32,
+    current_measure_index: usize,
+    current_division_index: usize,
+    tempo: usize,
+    last_played_measure_index: Option<usize>,
+    last_played_division_index: Option<usize>,
 }
 #[cfg(not(target_arch = "wasm32"))]
 fn execute<F>(f: F)
@@ -126,196 +120,85 @@ impl TabApp {
         };
         let renderer = Renderer::new(configs.measures_per_row, configs.dashes_per_division);
 
-        let stop_flag = Arc::new(AtomicBool::new(false));
-
         let audio_player_configs = configs.guitar_configs[configs.active_guitar].clone();
-        let audio_player =
-            AudioPlayer::new(audio_player_configs).expect("Failed to initialize AudioPlayer");
-        audio_player.start().expect("Failed to start AudioPlayer");
+        let audio_player = AudioPlayer::new(audio_player_configs);
 
-        let (_match_result_sender, match_result_receiver) = mpsc::channel();
-        let expected_notes = Arc::new(Mutex::new(None));
-
-        let output_signal_history = audio_player.output_signal.clone();
         let score_channel = channel();
         Self {
             score,
             renderer,
-            playback_handle: None,
-            notes_receiver: None,
             is_playing: false,
-            stop_flag,
             configs,
             display_metrics,
             previous_notes: None,
             current_notes: None,
             audio_player,
-            match_result_receiver,
-            expected_notes,
             is_match: false,
             current_measure: None,
             current_division: None,
             last_division: None,
-            output_signal: output_signal_history,
             plot_length: 2048,
             plot_frequency_range: (50, 7500),
             score_channel,
+            playback_start_time: None,
+            current_time: 0.0,
+            current_measure_index: 0,
+            current_division_index: 0,
+            tempo: 120,
+            last_played_measure_index: None,
+            last_played_division_index: None,
         }
     }
 
-    fn render_plots(&mut self, ui: &mut egui::Ui) {
-        let output_signal = self.output_signal.lock().unwrap();
-        let len = output_signal.len();
+    fn update_playback(&mut self) {
+        if let Some(playback_start_time) = self.playback_start_time {
+            let elapsed = playback_start_time.elapsed().as_secs_f32();
+            self.current_time = elapsed;
 
-        if len > 0 {
-            let n = self.plot_length.min(len);
+            if let Some(score) = &self.score {
+                let seconds_per_beat = 60.0 / self.tempo as f32;
+                let seconds_per_division = seconds_per_beat / score.divisions_per_quarter as f32;
+                let total_divisions_passed = (elapsed / seconds_per_division) as usize;
 
-            let start = len - n;
-            let output_slice = &output_signal[start..];
+                let mut divisions_accum = 0;
+                let mut measure_found = false;
+                for (measure_idx, measure) in score.measures.iter().enumerate() {
+                    let measure_divisions = measure.positions.len();
+                    if divisions_accum + measure_divisions > total_divisions_passed {
+                        self.current_measure_index = measure_idx;
+                        self.current_division_index = total_divisions_passed - divisions_accum;
+                        measure_found = true;
+                        break;
+                    } else {
+                        divisions_accum += measure_divisions;
+                    }
+                }
 
-            // Normalize the time-domain signal (optional)
-            let max_amplitude = output_slice
-                .iter()
-                .map(|&x| x.abs())
-                .fold(0.0_f32, f32::max);
-            let normalized_output: Vec<f32> = if max_amplitude > 0.0 {
-                output_slice.iter().map(|&x| x / max_amplitude).collect()
-            } else {
-                output_slice.to_vec()
-            };
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Samples:");
-                    ui.add(egui::Slider::new(&mut self.plot_length, 256..=16384).step_by(256.0));
-                });
+                if measure_found {
+                    // Check if we've moved to a new division
+                    if Some(self.current_measure_index) != self.last_played_measure_index
+                        || Some(self.current_division_index) != self.last_played_division_index
+                    {
+                        let measure = &score.measures[self.current_measure_index];
+                        if self.current_division_index < measure.positions.len() {
+                            let notes = measure.positions[self.current_division_index].clone();
 
-                // Plot Time-Domain Signal
-                let plot_points: PlotPoints = (0..n)
-                    .map(|i| [i as f64, normalized_output[i] as f64])
-                    .collect();
+                            if !notes.is_empty() {
+                                let duration = seconds_per_division * notes[0].duration as f32;
+                                self.audio_player.play_notes(&notes, duration);
 
-                let line = Line::new(plot_points);
-
-                Plot::new("Time Domain")
-                    .view_aspect(3.0)
-                    .include_y(-1.1)
-                    .include_y(1.1)
-                    .include_x(0.0)
-                    .include_x(n as f64)
-                    .x_axis_label("Sample Index")
-                    .y_axis_label("Amplitude")
-                    .show(ui, |plot_ui| {
-                        plot_ui.line(line);
-                    });
-            });
-
-            // Compute FFT
-            let mut planner = FftPlanner::new();
-            let fft = planner.plan_fft_forward(n);
-
-            // Prepare complex input
-            let mut input: Vec<Complex<f32>> = normalized_output
-                .iter()
-                .map(|&x| Complex { re: x, im: 0.0 })
-                .collect();
-
-            // Apply Hanning window
-            for (i, sample) in input.iter_mut().enumerate() {
-                let multiplier =
-                    0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / n as f32).cos());
-                sample.re *= multiplier;
-            }
-
-            // Perform FFT in-place
-            fft.process(&mut input);
-
-            // Compute magnitude spectrum in dB
-            let epsilon = 1e-10_f64; // Small value to prevent log(0)
-            let magnitude_spectrum_db: Vec<f64> = input
-                .iter()
-                .take(n / 2) // Only need first half of spectrum
-                .map(|c| {
-                    let mag = c.norm() as f64 + epsilon;
-                    20.0 * mag.log10()
-                })
-                .collect();
-
-            // Find the maximum magnitude in dB
-            let max_db = magnitude_spectrum_db
-                .iter()
-                .cloned()
-                .fold(f64::MIN, f64::max);
-
-            // Normalize the magnitude spectrum so that the maximum is at 0 dB
-            let normalized_magnitude_spectrum_db: Vec<f64> = magnitude_spectrum_db
-                .iter()
-                .map(|&db| db - max_db)
-                .collect();
-
-            // Prepare frequency axis
-            let sample_rate = self.audio_player.sample_rate;
-            let freq_resolution = sample_rate as f64 / n as f64;
-            let frequencies: Vec<f64> = (0..n / 2).map(|i| i as f64 * freq_resolution).collect();
-
-            // Prepare data points for plotting
-            let spectrum_points_db: PlotPoints = frequencies
-                .iter()
-                .zip(normalized_magnitude_spectrum_db.iter())
-                .map(|(&freq, &mag_db)| [freq, mag_db])
-                .collect();
-
-            let spectrum_line_db = Line::new(spectrum_points_db);
-
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Frequency range (low, high):");
-                    ui.horizontal(|ui| {
-                        let max_low = self.plot_frequency_range.1 - 50;
-                        let low_max = self.plot_frequency_range.0 + 50;
-                        ui.add(egui::Slider::new(
-                            &mut self.plot_frequency_range.0,
-                            0..=max_low,
-                        ));
-                        ui.add(egui::Slider::new(
-                            &mut self.plot_frequency_range.1,
-                            low_max..=7500,
-                        ));
-                    });
-                });
-
-                // Plot Frequency-Domain Signal in dB
-                Plot::new("Frequency-Amplitude")
-                    .view_aspect(2.0)
-                    .allow_scroll(false)
-                    .allow_zoom(false)
-                    .include_y(0.0)
-                    .include_x(0.0)
-                    .include_x(sample_rate as f64 / 2.0)
-                    .x_axis_label("Frequency [Hz]")
-                    .y_axis_label("Amplitude [dB]")
-                    .label_formatter(|name, value| {
-                        if !name.is_empty() {
-                            format!("{}: {:.2} Hz, {:.2} dB", name, value.x, value.y)
-                        } else {
-                            format!("{:.2} Hz, {:.2} dB", value.x, value.y)
+                                self.previous_notes = self.current_notes.take();
+                                self.current_notes = Some(notes.clone());
+                            }
+                            // Update the last played indices
+                            self.last_played_measure_index = Some(self.current_measure_index);
+                            self.last_played_division_index = Some(self.current_division_index);
                         }
-                    })
-                    .show(ui, |plot_ui| {
-                        // Define fixed bounds for the plot
-                        let y_min = -200.0; // Set the lower bound of the y-axis
-                        let y_max = 10.0; // Set the upper bound of the y-axis
-
-                        // Apply the fixed bounds to the plot
-                        plot_ui.set_plot_bounds(PlotBounds::from_min_max(
-                            [self.plot_frequency_range.0 as f64, y_min],
-                            [self.plot_frequency_range.1 as f64, y_max],
-                        ));
-
-                        plot_ui.line(spectrum_line_db);
-                    });
-            });
-        } else {
-            ui.label("No data to display");
+                    }
+                } else {
+                    self.stop_playback();
+                }
+            }
         }
     }
 
@@ -325,44 +208,40 @@ impl TabApp {
         }
 
         if let Some(score) = &self.score {
-            let score = score.clone();
-            let (tx_notes, rx_notes) = mpsc::channel();
-            self.notes_receiver = Some(rx_notes);
-
-            self.stop_flag.store(false, Ordering::Relaxed);
-            let stop_flag = self.stop_flag.clone();
-
-            let tempo = if self.configs.use_custom_tempo {
-                Some(self.configs.custom_tempo)
-            } else {
-                Some(score.tempo)
-            };
-            self.playback_handle = Some(thread::spawn(move || {
-                let mut scrubber = TimeScrubber::new(&score, tempo);
-
-                scrubber.simulate_playback(&score, tx_notes, stop_flag);
-            }));
+            // Start the audio player
+            if let Err(e) = self.audio_player.start() {
+                eprintln!("Failed to start AudioPlayer: {}", e);
+                return;
+            }
 
             self.is_playing = true;
+            self.playback_start_time = Some(Instant::now());
+            self.current_time = 0.0;
+            self.current_measure_index = 0;
+            self.current_division_index = 0;
+
+            // Use custom tempo if set
+            self.tempo = if self.configs.use_custom_tempo {
+                self.configs.custom_tempo
+            } else {
+                score.tempo
+            };
         }
     }
 
     fn stop_playback(&mut self) {
         if self.is_playing {
-            self.stop_flag.store(true, Ordering::Relaxed);
-            if let Some(handle) = self.playback_handle.take() {
-                let _ = handle.join();
-            }
             self.is_playing = false;
+            self.playback_start_time = None;
+            self.current_time = 0.0;
+            self.current_measure_index = 0;
+            self.current_division_index = 0;
             self.current_notes = None;
             self.previous_notes = None;
             self.is_match = false;
+            self.last_played_measure_index = None;
+            self.last_played_division_index = None;
         }
-    }
-
-    fn update_audio_player_configs(&mut self) {
-        let configs = self.configs.guitar_configs[self.configs.active_guitar].clone();
-        self.audio_player.update_configs(configs);
     }
 
     fn render_tab(&self, painter: &egui::Painter, rect: egui::Rect) {
@@ -662,55 +541,6 @@ impl TabApp {
         );
     }
 
-    fn handle_playback_messages(&mut self) {
-        if let (Some(receiver), Some(score)) = (&self.notes_receiver, &self.score) {
-            while let Ok((notes, division, measure)) = receiver.try_recv() {
-                self.last_division = self.current_division.clone();
-                self.current_division = Some(division);
-                self.current_measure = Some(measure);
-                if !notes.is_empty() {
-                    // Update previous and current notes
-                    self.previous_notes = self.current_notes.take();
-
-                    self.current_notes = Some(notes.clone());
-
-                    // Update expected notes for the AudioListener
-                    let mut expected_notes = self.expected_notes.lock().unwrap();
-                    *expected_notes = Some(notes.clone());
-
-                    let seconds_per_division = {
-                        let cfg = &self.configs;
-                        if cfg.use_custom_tempo {
-                            60.0 / cfg.custom_tempo as f32 / score.divisions_per_quarter as f32
-                        } else {
-                            60.0 / score.tempo as f32 / score.divisions_per_quarter as f32
-                        }
-                    };
-                    self.display_metrics.total_score_time = score.measures.len() as f32
-                        * seconds_per_division
-                        * score.divisions_per_measure as f32;
-
-                    // Play the notes
-                    let duration = seconds_per_division * notes[0].duration as f32;
-                    self.audio_player.play_notes(&notes, duration);
-                }
-            }
-        }
-    }
-
-    fn handle_match_results(&mut self) {
-        while let Ok(is_match) = self.match_result_receiver.try_recv() {
-            if self.is_playing
-                && self.current_notes.is_some()
-                && self.current_division != self.last_division
-            {
-                self.is_match = is_match;
-            } else {
-                self.is_match = false;
-            }
-        }
-    }
-
     fn update_display_metrics(&mut self) {
         if let Some(score) = &self.score {
             let cfg = &self.configs;
@@ -782,8 +612,9 @@ impl TabApp {
 
 impl eframe::App for TabApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.handle_playback_messages();
-        self.handle_match_results();
+        if self.is_playing {
+            self.update_playback();
+        }
         self.update_display_metrics();
 
         let mut changed_config = false;
@@ -894,7 +725,8 @@ impl eframe::App for TabApp {
         egui::Window::new("Input plot")
             .fixed_size(Vec2::new(800.0, 800.0))
             .show(ctx, |ui| {
-                self.render_plots(ui);
+                // self.render_plots(ui);
+                ui.label("TODO");
             });
 
         // Central panel to display the tabs and other information
@@ -910,62 +742,6 @@ impl eframe::App for TabApp {
 
             self.render_tab_view(ui);
         });
-
-        if changed_config {
-            self.update_audio_player_configs();
-        }
-
-        // // Handle file dialog
-        // if self.open_file_dialog.is_some() {
-        //     // Create a temporary variable to hold the selected file
-        //     let selected_file = {
-        //         // Limit the scope of the mutable borrow
-        //         let dialog = self.open_file_dialog.as_mut().unwrap();
-        //         if dialog.show(ctx).selected() {
-        //             dialog.path().map(|p| p.to_path_buf())
-        //         } else {
-        //             None
-        //         }
-        //     };
-
-        //     // Now we can safely borrow `self` mutably again
-        //     if let Some(file) = selected_file {
-        //         // Close the dialog
-        //         self.open_file_dialog = None;
-
-        //         // Stop any existing playback
-        //         self.stop_playback();
-
-        //         // Update the configs.file_path
-        //         self.configs.file_path = Some(file.clone());
-
-        //         // Reload the score
-        //         match Score::parse_from_musicxml(&file) {
-        //             Ok(new_score) => {
-        //                 self.score = Some(new_score);
-        //                 self.update_display_metrics();
-        //                 // Reset any necessary state
-        //                 self.current_measure = None;
-        //                 self.current_division = None;
-        //                 self.last_division = None;
-        //             }
-        //             Err(err) => {
-        //                 // Handle parse error
-        //                 self.score = None;
-        //                 // Show error message
-        //                 eprintln!("Error parsing MusicXML file: {}", err);
-        //             }
-        //         }
-        //     }
-        // }
-
-        // Check if playback has finished
-        if self.is_playing && self.stop_flag.load(Ordering::Relaxed) {
-            self.is_playing = false;
-            self.current_notes = None;
-            self.previous_notes = None;
-            self.is_match = false;
-        }
 
         ctx.request_repaint();
     }

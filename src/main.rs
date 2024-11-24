@@ -7,7 +7,6 @@ mod guitar;
 mod karplus_strong;
 mod music_representation;
 mod renderer;
-mod time_scrubber;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
