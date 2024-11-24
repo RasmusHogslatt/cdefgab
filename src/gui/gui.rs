@@ -10,22 +10,18 @@ use crate::time_scrubber::time_scrubber::TimeScrubber;
 use eframe::egui;
 use egui::epaint::{PathStroke, QuadraticBezierShape};
 use egui::{Margin, ScrollArea, Vec2};
-use egui_file::FileDialog;
 use egui_plot::{Line, Plot, PlotBounds, PlotPoints};
 use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
 
+use std::path::PathBuf;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc::{self, Receiver},
     Arc, Mutex,
 };
-use std::{env, thread};
-use std::{
-    ffi::OsStr,
-    path::{Path, PathBuf},
-};
+use std::thread;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
@@ -96,7 +92,6 @@ pub struct TabApp {
     current_measure: Option<usize>,
     current_division: Option<usize>,
     last_division: Option<usize>,
-    open_file_dialog: Option<FileDialog>,
     plot_length: usize,
     plot_frequency_range: (usize, usize),
     score_channel: (Sender<Score>, Receiver<Score>),
@@ -161,7 +156,6 @@ impl TabApp {
             current_measure: None,
             current_division: None,
             last_division: None,
-            open_file_dialog: None,
             output_signal: output_signal_history,
             plot_length: 2048,
             plot_frequency_range: (50, 7500),
@@ -811,6 +805,7 @@ impl eframe::App for TabApp {
             self.ui_render_settings(ui, &mut changed_rendered_score);
             self.ui_current_notes(ui);
             if ui.button("Open File").clicked() {
+                self.stop_playback();
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     let sender = self.score_channel.0.clone();
@@ -986,23 +981,6 @@ impl TabApp {
                 }
                 if ui.button("Stop").clicked() {
                     self.stop_playback();
-                }
-                if ui.button("Open File").clicked() {
-                    // Stop any existing playback
-                    self.stop_playback();
-
-                    // Filter for .xml files
-                    let filter = Box::new({
-                        let ext = Some(OsStr::new("xml"));
-                        move |path: &Path| -> bool { path.extension() == ext }
-                    });
-
-                    // Set the initial directory to the current working directory
-                    let current_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-                    let mut dialog =
-                        FileDialog::open_file(Some(current_dir)).show_files_filter(filter);
-                    dialog.open();
-                    self.open_file_dialog = Some(dialog);
                 }
             });
             ui.horizontal(|ui| {
