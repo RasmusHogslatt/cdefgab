@@ -9,7 +9,10 @@ use crate::renderer::renderer::{score_info, Renderer};
 use eframe::egui;
 use egui::epaint::{PathStroke, QuadraticBezierShape};
 use egui::{Margin, ScrollArea, Vec2};
+use egui_plot::{Line, Plot, PlotPoints};
 use instant::Instant;
+use rustfft::num_complex::Complex32;
+use rustfft::FftPlanner;
 
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
@@ -239,7 +242,76 @@ impl TabApp {
             self.last_played_division_index = None;
         }
     }
+    fn render_plots(&mut self, ui: &mut egui::Ui) {
+        // Constants
+        let sample_rate = self.audio_player.sample_rate as f64;
+        let output_signal = &self.audio_player.output_signal;
 
+        // Limit the number of samples to plot
+        let max_samples = 2048;
+        let num_samples = output_signal.len().min(max_samples);
+        let start_index = output_signal.len().saturating_sub(max_samples);
+
+        if num_samples > 0 {
+            // Time Domain Plot
+            ui.heading("Time Domain");
+            let time_points: PlotPoints = (start_index..output_signal.len())
+                .map(|i| {
+                    let time = i as f64 / sample_rate;
+                    let sample = output_signal[i] as f64;
+                    [time, sample]
+                })
+                .collect();
+
+            let line = Line::new(time_points);
+            Plot::new("Time Domain")
+                .view_aspect(2.0)
+                .include_y(-1.0)
+                .include_y(1.0)
+                .show(ui, |plot_ui| {
+                    plot_ui.line(line);
+                });
+
+            // Frequency Domain Plot
+            ui.heading("Frequency Domain");
+            let fft_size = num_samples.next_power_of_two();
+            let mut planner = FftPlanner::<f32>::new();
+            let fft = planner.plan_fft_forward(fft_size);
+
+            // Prepare the buffer for FFT
+            let mut buffer: Vec<Complex32> = output_signal[start_index..]
+                .iter()
+                .map(|&sample| Complex32::new(sample, 0.0))
+                .collect();
+
+            // Zero-pad if necessary
+            buffer.resize(fft_size, Complex32::new(0.0, 0.0));
+
+            // Perform the FFT
+            fft.process(&mut buffer);
+
+            // Compute magnitude spectrum
+            let freq_points: PlotPoints = buffer[..fft_size / 2]
+                .iter()
+                .enumerate()
+                .map(|(i, c)| {
+                    let freq = i as f64 * sample_rate / fft_size as f64;
+                    let magnitude = c.norm() as f64;
+                    [freq, magnitude]
+                })
+                .collect();
+
+            let line = Line::new(freq_points);
+            Plot::new("Frequency Domain")
+                .view_aspect(2.0)
+                .include_y(0.0)
+                .show(ui, |plot_ui| {
+                    plot_ui.line(line);
+                });
+        } else {
+            ui.label("No data to display.");
+        }
+    }
     fn render_tab(&self, painter: &egui::Painter, rect: egui::Rect) {
         // Constants for rendering
         let num_strings = 6;
@@ -715,8 +787,7 @@ impl eframe::App for TabApp {
         egui::Window::new("Input plot")
             .fixed_size(Vec2::new(800.0, 800.0))
             .show(ctx, |ui| {
-                // self.render_plots(ui);
-                ui.label("TODO");
+                self.render_plots(ui);
             });
 
         // Central panel to display the tabs and other information
