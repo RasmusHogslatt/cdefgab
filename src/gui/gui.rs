@@ -76,8 +76,6 @@ pub struct TabApp {
     current_notes: Option<Vec<Note>>,
     audio_player: AudioPlayer,
     is_match: bool,
-    current_measure: Option<usize>,
-    current_division: Option<usize>,
     last_division: Option<usize>,
     plot_length: usize,
     plot_frequency_range: (usize, usize),
@@ -134,8 +132,6 @@ impl TabApp {
             current_notes: None,
             audio_player,
             is_match: false,
-            current_measure: None,
-            current_division: None,
             last_division: None,
             plot_length: 2048,
             plot_frequency_range: (50, 7500),
@@ -316,15 +312,13 @@ impl TabApp {
             }
 
             // Draw the playback position indicator (if applicable)
-            if let (Some(current_measure), Some(current_division)) =
-                (self.current_measure, self.current_division)
-            {
+            if self.is_playing {
                 self.draw_playback_indicator(
                     painter,
                     rect.min.x,
                     rect.min.y,
-                    current_measure,
-                    current_division,
+                    self.current_measure_index,
+                    self.current_division_index,
                     measures_per_row,
                     &score,
                     num_strings,
@@ -624,8 +618,6 @@ impl eframe::App for TabApp {
         if let Ok(new_score) = self.score_channel.1.try_recv() {
             self.score = Some(new_score);
             // Reset any necessary state
-            self.current_measure = None;
-            self.current_division = None;
             self.last_division = None;
             // Any other state resets
         }
@@ -716,8 +708,6 @@ impl eframe::App for TabApp {
         if let Ok(new_score) = self.score_channel.1.try_recv() {
             self.score = Some(new_score);
             self.stop_playback(); // If you have a method to stop playback
-            self.current_measure = None;
-            self.current_division = None;
             self.last_division = None;
             // Reset other relevant state variables
         }
