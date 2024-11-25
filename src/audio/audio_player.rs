@@ -27,7 +27,9 @@ impl AudioPlayer {
             output_signal: Vec::new(),
         }
     }
-
+    pub fn update_configs(&mut self, configs: GuitarConfig) {
+        self.configs = configs;
+    }
     pub fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if self.manager.is_none() {
             let manager = AudioManager::new(AudioManagerSettings::default())?;

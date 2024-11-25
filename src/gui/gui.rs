@@ -79,7 +79,6 @@ pub struct TabApp {
     current_notes: Option<Vec<Note>>,
     audio_player: AudioPlayer,
     is_match: bool,
-    last_division: Option<usize>,
     plot_length: usize,
     plot_frequency_range: (usize, usize),
     score_channel: (Sender<Score>, Receiver<Score>),
@@ -135,7 +134,6 @@ impl TabApp {
             current_notes: None,
             audio_player,
             is_match: false,
-            last_division: None,
             plot_length: 2048,
             plot_frequency_range: (50, 7500),
             score_channel,
@@ -690,10 +688,12 @@ impl eframe::App for TabApp {
         if let Ok(new_score) = self.score_channel.1.try_recv() {
             self.score = Some(new_score);
             // Reset any necessary state
-            self.last_division = None;
-            // Any other state resets
+            self.stop_playback();
+            self.previous_notes = None;
+            self.current_notes = None;
+            self.last_played_measure_index = None;
+            self.last_played_division_index = None;
         }
-
         egui::SidePanel::left("left_panel").show(ctx, |ui| {
             self.ui_playback_controls(ui, &mut changed_config);
             self.ui_guitar_settings(ui, &mut changed_config);
@@ -777,11 +777,10 @@ impl eframe::App for TabApp {
                 }
             }
         });
-        if let Ok(new_score) = self.score_channel.1.try_recv() {
-            self.score = Some(new_score);
-            self.stop_playback(); // If you have a method to stop playback
-            self.last_division = None;
-            // Reset other relevant state variables
+        if changed_config {
+            let active_guitar_config =
+                self.configs.guitar_configs[self.configs.active_guitar].clone();
+            self.audio_player.update_configs(active_guitar_config);
         }
 
         egui::Window::new("Input plot")
