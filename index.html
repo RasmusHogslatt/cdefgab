@@ -9,19 +9,30 @@
     <title>Tab App</title>
 
     <!-- Configure the Rust WASM binary -->
-    <link data-trunk rel="rust" data-wasm-opt="2" />
+    
+<script type="module" nonce="DpgFuh6bjImP454WWI3fCQ==">
+import init, * as bindings from 'https://rasmushogslatt.github.io/cdefgab/cdefgab-3e994b4b6102920f.js';
+const wasm = await init({ module_or_path: 'https://rasmushogslatt.github.io/cdefgab/cdefgab-3e994b4b6102920f_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
     <!-- Base URL for asset loading -->
-    <base data-trunk-public-url />
+    <base href="https://rasmushogslatt.github.io/cdefgab/" />
 
     <!-- Favicon -->
-    <link data-trunk rel="icon" href="assets/favicon.ico">
+    <link rel="icon" href="https://rasmushogslatt.github.io/cdefgab/favicon-f402c8741ce815ec.ico" integrity="sha384&#x2D;jNOAE6jgE03LznIulCTVP6BH4NrTuROFjP9wj8bV1UUMJKtZAvstFpIAP3PDcFpx"/>
 
     <!-- Progressive Web App (PWA) assets -->
-    <link data-trunk rel="copy-file" href="assets/sw.js" />
-    <link data-trunk rel="copy-file" href="assets/manifest.json" data-target-path="assets" />
-    <link data-trunk rel="copy-file" href="assets/icon-1024.png" data-target-path="assets" />
-    <link data-trunk rel="copy-file" href="assets/icon-256.png" data-target-path="assets" />
-    <link data-trunk rel="copy-file" href="assets/icon_ios_touch_192.png" data-target-path="assets" />
+    
+    
+    
+    
+    
     <!-- <link data-trunk rel="copy-file" href="assets/maskable_icon_512.png" data-target-path="assets" /> -->
 
     <!-- PWA manifest and iOS icon -->
@@ -116,7 +127,7 @@
             }
         }
     </style>
-</head>
+<link rel="modulepreload" href="https://rasmushogslatt.github.io/cdefgab/cdefgab-3e994b4b6102920f.js" crossorigin=anonymous integrity="sha384-T1u+HN+T0yU4tcd+dUI2A85u2nEr7740ACPrQZNlJV5dxtIWgmOrS+oRi+IXwrsk"><link rel="preload" href="https://rasmushogslatt.github.io/cdefgab/cdefgab-3e994b4b6102920f_bg.wasm" crossorigin=anonymous integrity="sha384-MlsI5ko5NquAksDQRXS+wo1zPwX5gDSIpDogJTQNYpZZ5ucUYg82Y2a229SR+HmJ" as="fetch" type="application/wasm"></head>
 
 <body>
     <!-- Canvas element that will be used by egui -->
