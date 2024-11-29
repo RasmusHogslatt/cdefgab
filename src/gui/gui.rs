@@ -24,6 +24,9 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 #[cfg(target_arch = "wasm32")]
 use web_sys::{Event, HtmlInputElement};
+
+pub const DEFAULT_MUSICXML: &str = include_str!("../../assets/silent_night.xml");
+
 #[derive(Clone)]
 pub struct Configs {
     pub custom_tempo: usize,
@@ -113,8 +116,12 @@ impl TabApp {
         let display_metrics = DisplayMetrics {
             total_score_time: 0.0,
         };
-        let file_path = configs.file_path.clone();
-        let score = match &file_path {
+
+        #[cfg(target_arch = "wasm32")]
+        let score = Score::parse_from_musicxml_str(DEFAULT_MUSICXML).ok();
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let score = match &configs.file_path {
             Some(path) => Score::parse_from_musicxml(path).ok(),
             None => None,
         };
