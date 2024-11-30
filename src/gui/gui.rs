@@ -8,7 +8,7 @@ use crate::renderer::renderer::{score_info, Renderer};
 
 use eframe::egui;
 use egui::epaint::{PathStroke, QuadraticBezierShape};
-use egui::{Margin, ScrollArea, Vec2};
+use egui::{Margin, RichText, ScrollArea, Vec2};
 use egui_plot::{Line, Plot, PlotPoints};
 use instant::Instant;
 use rustfft::num_complex::Complex32;
@@ -25,6 +25,7 @@ use wasm_bindgen::JsCast;
 #[cfg(target_arch = "wasm32")]
 use web_sys::{Event, HtmlInputElement};
 
+#[cfg(target_arch = "wasm32")]
 pub const DEFAULT_MUSICXML: &str = include_str!("../../assets/silent_night.xml");
 
 #[derive(Clone)]
@@ -92,6 +93,7 @@ pub struct TabApp {
     tempo: usize,
     last_played_measure_index: Option<usize>,
     last_played_division_index: Option<usize>,
+    show_about: bool,
 }
 #[cfg(not(target_arch = "wasm32"))]
 fn execute<F>(f: F)
@@ -151,6 +153,7 @@ impl TabApp {
             tempo: 120,
             last_played_measure_index: None,
             last_played_division_index: None,
+            show_about: true,
         }
     }
 
@@ -702,11 +705,186 @@ impl eframe::App for TabApp {
             self.last_played_division_index = None;
         }
         egui::SidePanel::left("left_panel").show(ctx, |ui| {
+            ui.separator();
+            if ui.button("About").clicked() {
+                self.show_about = true;
+            }
+            self.ui_about(ctx);
             self.ui_playback_controls(ui, &mut changed_config);
             self.ui_guitar_settings(ui, &mut changed_config);
             self.ui_render_settings(ui, &mut changed_rendered_score);
             self.ui_current_notes(ui);
-            if ui.button("Open File").clicked() {
+        });
+        if changed_config {
+            let active_guitar_config =
+                self.configs.guitar_configs[self.configs.active_guitar].clone();
+            self.audio_player.update_configs(active_guitar_config);
+        }
+
+        egui::Window::new("Input plot")
+            .fixed_size(Vec2::new(800.0, 800.0))
+            .show(ctx, |ui| {
+                self.render_plots(ui);
+            });
+
+        // Central panel to display the tabs and other information
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Parsed Score Info");
+            if let Some(score) = &self.score {
+                ScrollArea::vertical()
+                    .id_salt("score_info_scroll_area")
+                    .show(ui, |ui| {
+                        ui.monospace(score_info(&score));
+                    });
+            }
+
+            self.render_tab_view(ui);
+        });
+
+        ctx.request_repaint();
+    }
+}
+
+impl TabApp {
+   
+        fn ui_about(&mut self, ctx: &egui::Context) {
+            egui::Window::new("About")
+                .open(&mut self.show_about)
+                .collapsible(false)
+                .resizable(true) // Allow resizing if the content is extensive
+                .vscroll(true)   // Enable vertical scrolling if content overflows
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.heading("Frequently Asked Questions");
+                        ui.separator();
+                    });
+    
+                    ui.add_space(10.0);
+    
+                    // Question 1
+                    ui.label(RichText::new("What is MusicXML?").size(18.0));
+                    ui.label(
+                        "MusicXML is an open, XML-based music notation file format designed for \
+                        the interchange of digital sheet music between applications. It allows for \
+                        the sharing of musical scores between different music notation software. \
+                        For more information, visit the official MusicXML website:",
+                    );
+                    ui.hyperlink("https://www.musicxml.com/");
+    
+                    ui.add_space(10.0);
+    
+                    // Question 2
+                    ui.label(RichText::new("How do I obtain MusicXML files?").size(18.0));
+                    ui.label(
+                        "You can create MusicXML files using music notation software that supports \
+                        exporting to MusicXML format, such as Finale, Sibelius, MuseScore, and others. \
+                        Additionally, you can find MusicXML files from online resources:",
+                    );
+                    ui.hyperlink("https://musescore.com/");
+                    ui.hyperlink("https://www.musicxml.com/music-in-musicxml/");
+    
+                    ui.add_space(10.0);
+    
+                    ui.label(RichText::new("I got a .mxl file instead of .xml file. What do I do?").size(18.0));
+                    ui.label(
+                        "Often when downloading a musicxml file, you get a .mxl file. This is a \
+                        compressed version of musicxml. This is easily converted by renaming the file \
+                        to a .zip file and then extracting it. This gives you a folder your score as .xml \
+                        and another folder that you can ignore. Simply choose the .xml file when uploading \
+                        a file to this application.",
+                    );
+
+                    ui.label(RichText::new("Can I convert other formats to MusicXML?").size(18.0));
+                    ui.label(
+                        "Yes, many music notation programs allow you to import various formats and \
+                        export them as MusicXML. There are also dedicated conversion tools available. \
+                        Check out the following resource for more information:",
+                    );
+                    ui.hyperlink("https://www.musicxml.com/dolet-plugin/");
+    
+                    ui.add_space(10.0);
+    
+                    ui.label(RichText::new("Why use MusicXML in this application?").size(18.0));
+                    ui.label(
+                        "When playing guitar, tablature is a great tool for those not familiar \
+                        with traditional musical notation. It is often easier to find well written \
+                        notation for other instruments. This application tries to understand scores \
+                        written for any instrument and convert it to tablature, and also let you play \
+                        around with playback to let you get a feeling of the expected sound.",
+                    );
+    
+                    ui.add_space(10.0);
+    
+                    // Additional Resources
+                    ui.label(RichText::new("**Additional Resources:**").size(18.0));
+                    ui.hyperlink("MusicXML Tutorial - https://www.musicxml.com/tutorial/");
+                    ui.hyperlink("MusicXML GitHub Repository - https://github.com/w3c/musicxml");
+    
+                    ui.add_space(20.0);
+    
+                    ui.separator();
+    
+                    // Credits or other information
+                    ui.vertical_centered(|ui| {
+                        ui.label(RichText::new("Author: Rasmus Hogslätt").size(16.0));
+                    });
+    
+                    ui.add_space(10.0);
+                });
+        }
+    
+    
+
+    fn ui_playback_controls(&mut self, ui: &mut egui::Ui, changed_config: &mut bool) {
+        ui.group(|ui| {
+            ui.heading("Playback Controls");
+            ui.horizontal(|ui| {
+                if ui.button("Play").clicked() {
+                    self.start_playback();
+                }
+                if ui.button("Stop").clicked() {
+                    self.stop_playback();
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Volume:");
+                let active_guitar_config =
+                    &mut self.configs.guitar_configs[self.configs.active_guitar];
+                if ui
+                    .add(
+                        egui::Slider::new(&mut active_guitar_config.volume, 0.0..=1.0)
+                            .step_by(0.01),
+                    )
+                    .changed()
+                {
+                    *changed_config = true;
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Set custom tempo:");
+                ui.checkbox(&mut self.configs.use_custom_tempo, "");
+            });
+            if self.configs.use_custom_tempo {
+                if ui
+                    .add(egui::Slider::new(&mut self.configs.custom_tempo, 1..=240))
+                    .changed()
+                {
+                    *changed_config = true;
+                }
+            }
+            ui.label(format!(
+                "Total score time: {:.2} seconds",
+                self.display_metrics.total_score_time
+            ));
+            ui.label("Capo fret:");
+            let active_guitar_config = &mut self.configs.guitar_configs[self.configs.active_guitar];
+            if ui
+                .add(egui::Slider::new(&mut active_guitar_config.capo_fret, 0..=24).text("Fret"))
+                .changed()
+            {
+                *changed_config = true;
+            }
+            if ui.button("Choose File").clicked() {
                 self.stop_playback();
                 #[cfg(not(target_arch = "wasm32"))]
                 {
@@ -782,87 +960,6 @@ impl eframe::App for TabApp {
                     document.body().unwrap().append_child(&input).unwrap();
                     input.click();
                 }
-            }
-        });
-        if changed_config {
-            let active_guitar_config =
-                self.configs.guitar_configs[self.configs.active_guitar].clone();
-            self.audio_player.update_configs(active_guitar_config);
-        }
-
-        egui::Window::new("Input plot")
-            .fixed_size(Vec2::new(800.0, 800.0))
-            .show(ctx, |ui| {
-                self.render_plots(ui);
-            });
-
-        // Central panel to display the tabs and other information
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Parsed Score Info");
-            if let Some(score) = &self.score {
-                ScrollArea::vertical()
-                    .id_salt("score_info_scroll_area")
-                    .show(ui, |ui| {
-                        ui.monospace(score_info(&score));
-                    });
-            }
-
-            self.render_tab_view(ui);
-        });
-
-        ctx.request_repaint();
-    }
-}
-
-impl TabApp {
-    fn ui_playback_controls(&mut self, ui: &mut egui::Ui, changed_config: &mut bool) {
-        ui.group(|ui| {
-            ui.heading("Playback Controls");
-            ui.horizontal(|ui| {
-                if ui.button("Play").clicked() {
-                    self.start_playback();
-                }
-                if ui.button("Stop").clicked() {
-                    self.stop_playback();
-                }
-            });
-            ui.horizontal(|ui| {
-                ui.label("Volume:");
-                let active_guitar_config =
-                    &mut self.configs.guitar_configs[self.configs.active_guitar];
-                if ui
-                    .add(
-                        egui::Slider::new(&mut active_guitar_config.volume, 0.0..=1.0)
-                            .step_by(0.01),
-                    )
-                    .changed()
-                {
-                    *changed_config = true;
-                }
-            });
-            ui.horizontal(|ui| {
-                ui.label("Set custom tempo:");
-                ui.checkbox(&mut self.configs.use_custom_tempo, "");
-            });
-            if self.configs.use_custom_tempo {
-                if ui
-                    .add(egui::Slider::new(&mut self.configs.custom_tempo, 1..=240))
-                    .changed()
-                {
-                    *changed_config = true;
-                }
-            }
-            ui.label(format!(
-                "Total score time: {:.2} seconds",
-                self.display_metrics.total_score_time
-            ));
-            ui.label("Capo fret:");
-            let active_guitar_config = &mut self.configs.guitar_configs[self.configs.active_guitar];
-            if ui
-                .add(egui::Slider::new(&mut active_guitar_config.capo_fret, 0..=24).text("Fret"))
-                .changed()
-            {
-                *changed_config = true;
             }
         });
     }

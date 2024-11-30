@@ -292,13 +292,18 @@ fn calculate_fret(open_string_pitch: &Pitch, note_pitch: &Pitch) -> Option<u8> {
     let open_midi = pitch_to_midi(open_string_pitch);
     let note_midi = pitch_to_midi(note_pitch);
     if note_midi >= open_midi {
-        Some(note_midi - open_midi)
+        let fret = note_midi - open_midi;
+        if fret <= 24 {
+            Some(fret as u8)
+        } else {
+            None
+        }
     } else {
         None
     }
 }
 
-fn pitch_to_midi(pitch: &Pitch) -> u8 {
+fn pitch_to_midi(pitch: &Pitch) -> u16 {
     let step_to_semitone = |step: char| match step {
         'C' => 0,
         'D' => 2,
@@ -309,6 +314,8 @@ fn pitch_to_midi(pitch: &Pitch) -> u8 {
         'B' => 11,
         _ => 0,
     };
-    let semitone = step_to_semitone(pitch.step) + pitch.alter.unwrap_or(0);
-    (pitch.octave * 12) + semitone as u8
+    let semitone = step_to_semitone(pitch.step) as i16 + pitch.alter.unwrap_or(0) as i16;
+    let octave = pitch.octave as u16;
+    let midi_note = (octave * 12) as i16 + semitone;
+    midi_note as u16
 }
