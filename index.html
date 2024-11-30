@@ -9,20 +9,31 @@
     <title>Tab App</title>
 
     <!-- Configure the Rust WASM binary -->
-    <link data-trunk rel="rust" data-wasm-opt="2" />
+    
+<script type="module" nonce="AuR+Tkgb7gaPoprIzsKSqg==">
+import init, * as bindings from 'https://rasmushogslatt.github.io/cdefgab/cdefgab-2ef4cc2130428609.js';
+const wasm = await init({ module_or_path: 'https://rasmushogslatt.github.io/cdefgab/cdefgab-2ef4cc2130428609_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
     <!-- Base URL for asset loading -->
-    <base data-trunk-public-url />
+    <base href="https://rasmushogslatt.github.io/cdefgab/" />
 
     <!-- Favicon -->
-    <link data-trunk rel="icon" href="assets/favicon.ico">
+    <link rel="icon" href="https://rasmushogslatt.github.io/cdefgab/favicon-f402c8741ce815ec.ico" integrity="sha384&#x2D;jNOAE6jgE03LznIulCTVP6BH4NrTuROFjP9wj8bV1UUMJKtZAvstFpIAP3PDcFpx"/>
 
     <!-- Progressive Web App (PWA) assets -->
-    <link data-trunk rel="copy-file" href="assets/sw.js" />
-    <link data-trunk rel="copy-file" href="assets/manifest.json" data-target-path="assets" />
-    <link data-trunk rel="copy-file" href="assets/icon-1024.png" data-target-path="assets" />
-    <link data-trunk rel="copy-file" href="assets/icon-256.png" data-target-path="assets" />
-    <link data-trunk rel="copy-file" href="assets/icon_ios_touch_192.png" data-target-path="assets" />
-    <link data-trunk rel="copy-file" href="assets/silent_night.xml" data-target-path="assets" />
+    
+    
+    
+    
+    
+    
     <!-- <link data-trunk rel="copy-file" href="assets/maskable_icon_512.png" data-target-path="assets" /> -->
 
     <!-- PWA manifest and iOS icon -->
@@ -117,7 +128,7 @@
             }
         }
     </style>
-</head>
+<link rel="modulepreload" href="https://rasmushogslatt.github.io/cdefgab/cdefgab-2ef4cc2130428609.js" crossorigin=anonymous integrity="sha384-9J43n3MiIjbZ/g3BxnIbwZ1IRm5wXY9ErWvfaC1ka+hGGdjF/1WK3J6TuYZc3Apm"><link rel="preload" href="https://rasmushogslatt.github.io/cdefgab/cdefgab-2ef4cc2130428609_bg.wasm" crossorigin=anonymous integrity="sha384-1LmGIDZFsqk6b5MjqEtE/4uoD3tl0oKXjsdgZ2rzajJekU/qDvEJdm23nTkaTpBW" as="fetch" type="application/wasm"></head>
 
 <body>
     <!-- Canvas element that will be used by egui -->
